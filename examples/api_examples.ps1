@@ -1,10 +1,10 @@
 # User Profiler API — PowerShell examples
-# Start the server first: uvicorn main:app --reload
+# Start the server first: uvicorn up_api.main:app --reload
 
 $BASE = "http://localhost:8000"
 
 # ---------------------------------------------------------------------------
-# 0. List all user IDs
+# 0. List all users (empty at start)
 # ---------------------------------------------------------------------------
 Write-Host "`n--- 0. List all users ---"
 Invoke-RestMethod -Method Get -Uri "$BASE/users" | ConvertTo-Json -Depth 10
@@ -23,6 +23,7 @@ $user1 = Invoke-RestMethod -Method Post -Uri "$BASE/user" `
     affiliation = "University of Milan"
   } | ConvertTo-Json -Depth 10)
 $user1 | ConvertTo-Json -Depth 10
+$user1Id = $user1.userId
 
 # ---------------------------------------------------------------------------
 # 2. Create a full user  (location + ORCID + publications + session)
@@ -59,25 +60,31 @@ $user2 = Invoke-RestMethod -Method Post -Uri "$BASE/user" `
     })
   } | ConvertTo-Json -Depth 10)
 $user2 | ConvertTo-Json -Depth 10
+$user2Id = $user2.userId
 
 # ---------------------------------------------------------------------------
-# 3. Get a user by ID
+# 3. List users (should show Alice and Bob)
 # ---------------------------------------------------------------------------
-Write-Host "`n--- 3. Get user by ID ---"
-$userId = $user2.userId
-Invoke-RestMethod -Method Get -Uri "$BASE/user/$userId" | ConvertTo-Json -Depth 10
+Write-Host "`n--- 3. List users ---"
+Invoke-RestMethod -Method Get -Uri "$BASE/users" | ConvertTo-Json -Depth 10
 
 # ---------------------------------------------------------------------------
-# 4. Get a user that does not exist
+# 4. Get a user by ID
 # ---------------------------------------------------------------------------
-Write-Host "`n--- 4. Get non-existent user ---"
+Write-Host "`n--- 4. Get user by ID ---"
+Invoke-RestMethod -Method Get -Uri "$BASE/user/$user2Id" | ConvertTo-Json -Depth 10
+
+# ---------------------------------------------------------------------------
+# 5. Get a user that does not exist
+# ---------------------------------------------------------------------------
+Write-Host "`n--- 5. Get non-existent user ---"
 Invoke-RestMethod -Method Get -Uri "$BASE/user/nonexistent-id-000" | ConvertTo-Json -Depth 10
 
 # ---------------------------------------------------------------------------
-# 5. Edit a user — update scalar fields
+# 6. Edit a user — update scalar fields
 # ---------------------------------------------------------------------------
-Write-Host "`n--- 5. Edit scalar fields ---"
-Invoke-RestMethod -Method Patch -Uri "$BASE/user/$userId" `
+Write-Host "`n--- 6. Edit scalar fields ---"
+Invoke-RestMethod -Method Patch -Uri "$BASE/user/$user2Id" `
   -ContentType "application/json" `
   -Body (@{
     age         = 42
@@ -85,20 +92,20 @@ Invoke-RestMethod -Method Patch -Uri "$BASE/user/$userId" `
   } | ConvertTo-Json -Depth 10) | ConvertTo-Json -Depth 10
 
 # ---------------------------------------------------------------------------
-# 6. Edit a user — replace location
+# 7. Edit a user — replace location
 # ---------------------------------------------------------------------------
-Write-Host "`n--- 6. Replace location ---"
-Invoke-RestMethod -Method Patch -Uri "$BASE/user/$userId" `
+Write-Host "`n--- 7. Replace location ---"
+Invoke-RestMethod -Method Patch -Uri "$BASE/user/$user2Id" `
   -ContentType "application/json" `
   -Body (@{
     location = @{ city = "Turin"; country = "Italy" }
   } | ConvertTo-Json -Depth 10) | ConvertTo-Json -Depth 10
 
 # ---------------------------------------------------------------------------
-# 7. Edit a user — replace sessions list
+# 8. Edit a user — replace sessions list
 # ---------------------------------------------------------------------------
-Write-Host "`n--- 7. Replace sessions ---"
-Invoke-RestMethod -Method Patch -Uri "$BASE/user/$userId" `
+Write-Host "`n--- 8. Replace sessions ---"
+Invoke-RestMethod -Method Patch -Uri "$BASE/user/$user2Id" `
   -ContentType "application/json" `
   -Body (@{
     sessions = @(@{
@@ -109,21 +116,30 @@ Invoke-RestMethod -Method Patch -Uri "$BASE/user/$userId" `
   } | ConvertTo-Json -Depth 10) | ConvertTo-Json -Depth 10
 
 # ---------------------------------------------------------------------------
-# 8. Edit a non-existent user
+# 9. Edit a non-existent user
 # ---------------------------------------------------------------------------
-Write-Host "`n--- 8. Edit non-existent user ---"
+Write-Host "`n--- 9. Edit non-existent user ---"
 Invoke-RestMethod -Method Patch -Uri "$BASE/user/nonexistent-id-000" `
   -ContentType "application/json" `
   -Body (@{ age = 99 } | ConvertTo-Json) | ConvertTo-Json -Depth 10
-
-# ---------------------------------------------------------------------------
-# 9. Delete a user
-# ---------------------------------------------------------------------------
-Write-Host "`n--- 9. Delete user ---"
-Invoke-RestMethod -Method Delete -Uri "$BASE/user/$userId" | ConvertTo-Json -Depth 10
 
 # ---------------------------------------------------------------------------
 # 10. Delete a non-existent user
 # ---------------------------------------------------------------------------
 Write-Host "`n--- 10. Delete non-existent user ---"
 Invoke-RestMethod -Method Delete -Uri "$BASE/user/nonexistent-id-000" | ConvertTo-Json -Depth 10
+
+# ---------------------------------------------------------------------------
+# 11. Delete both users
+# ---------------------------------------------------------------------------
+Write-Host "`n--- 11. Delete Alice ---"
+Invoke-RestMethod -Method Delete -Uri "$BASE/user/$user1Id" | ConvertTo-Json -Depth 10
+
+Write-Host "`n--- 11. Delete Bob ---"
+Invoke-RestMethod -Method Delete -Uri "$BASE/user/$user2Id" | ConvertTo-Json -Depth 10
+
+# ---------------------------------------------------------------------------
+# 12. List users (should be empty again)
+# ---------------------------------------------------------------------------
+Write-Host "`n--- 12. List users (empty) ---"
+Invoke-RestMethod -Method Get -Uri "$BASE/users" | ConvertTo-Json -Depth 10

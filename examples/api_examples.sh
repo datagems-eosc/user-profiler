@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # User Profiler API — curl examples
-# Start the server first: uvicorn main:app --reload
+# Start the server first: uvicorn up_api.main:app --reload
 
 BASE="http://localhost:8000"
+extract_id() { python -c "import sys,json; print(json.load(sys.stdin)['userId'])"; }
 
 # ---------------------------------------------------------------------------
-# 0. List all user IDs
+# 0. List all users (empty at start)
 # ---------------------------------------------------------------------------
+echo -e "\n--- 0. List all users ---"
 curl -s "$BASE/users" | python -m json.tool
 
 # ---------------------------------------------------------------------------
 # 1. Create a minimal user  (required fields only)
 # ---------------------------------------------------------------------------
-curl -s -X POST "$BASE/user" \
+echo -e "\n--- 1. Create minimal user ---"
+RESP1=$(curl -s -X POST "$BASE/user" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Alice",
@@ -20,12 +23,15 @@ curl -s -X POST "$BASE/user" \
     "age": 34,
     "email": "alice.rossi@example.com",
     "affiliation": "University of Milan"
-  }' | python -m json.tool
+  }')
+echo "$RESP1" | python -m json.tool
+USER1_ID=$(echo "$RESP1" | extract_id)
 
 # ---------------------------------------------------------------------------
 # 2. Create a full user  (location + ORCID + publications + session)
 # ---------------------------------------------------------------------------
-curl -s -X POST "$BASE/user" \
+echo -e "\n--- 2. Create full user ---"
+RESP2=$(curl -s -X POST "$BASE/user" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Bob",
@@ -67,24 +73,33 @@ curl -s -X POST "$BASE/user" \
         ]
       }
     ]
-  }' | python -m json.tool
+  }')
+echo "$RESP2" | python -m json.tool
+USER2_ID=$(echo "$RESP2" | extract_id)
 
 # ---------------------------------------------------------------------------
-# 3. Get a user by ID  (replace USER_ID with the id returned by create)
+# 3. List users (should show Alice and Bob)
 # ---------------------------------------------------------------------------
-USER_ID="<paste-userId-here>"
+echo -e "\n--- 3. List users ---"
+curl -s "$BASE/users" | python -m json.tool
 
-curl -s "$BASE/user/$USER_ID" | python -m json.tool
+# ---------------------------------------------------------------------------
+# 4. Get a user by ID
+# ---------------------------------------------------------------------------
+echo -e "\n--- 4. Get user by ID ---"
+curl -s "$BASE/user/$USER2_ID" | python -m json.tool
 
 # ---------------------------------------------------------------------------
-# 4. Get a user that does not exist
+# 5. Get a user that does not exist
 # ---------------------------------------------------------------------------
+echo -e "\n--- 5. Get non-existent user ---"
 curl -s "$BASE/user/nonexistent-id-000" | python -m json.tool
 
 # ---------------------------------------------------------------------------
-# 5. Edit a user — update scalar fields
+# 6. Edit a user — update scalar fields
 # ---------------------------------------------------------------------------
-curl -s -X PATCH "$BASE/user/$USER_ID" \
+echo -e "\n--- 6. Edit scalar fields ---"
+curl -s -X PATCH "$BASE/user/$USER2_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "age": 42,
@@ -92,9 +107,10 @@ curl -s -X PATCH "$BASE/user/$USER_ID" \
   }' | python -m json.tool
 
 # ---------------------------------------------------------------------------
-# 6. Edit a user — replace location
+# 7. Edit a user — replace location
 # ---------------------------------------------------------------------------
-curl -s -X PATCH "$BASE/user/$USER_ID" \
+echo -e "\n--- 7. Replace location ---"
+curl -s -X PATCH "$BASE/user/$USER2_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "location": {
@@ -104,10 +120,10 @@ curl -s -X PATCH "$BASE/user/$USER_ID" \
   }' | python -m json.tool
 
 # ---------------------------------------------------------------------------
-# 7. Edit a user — append a new session
-#    (PATCH replaces the sessions list; fetch first if you want to append)
+# 8. Edit a user — replace sessions list
 # ---------------------------------------------------------------------------
-curl -s -X PATCH "$BASE/user/$USER_ID" \
+echo -e "\n--- 8. Replace sessions ---"
+curl -s -X PATCH "$BASE/user/$USER2_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "sessions": [
@@ -122,18 +138,30 @@ curl -s -X PATCH "$BASE/user/$USER_ID" \
   }' | python -m json.tool
 
 # ---------------------------------------------------------------------------
-# 8. Edit a non-existent user
+# 9. Edit a non-existent user
 # ---------------------------------------------------------------------------
+echo -e "\n--- 9. Edit non-existent user ---"
 curl -s -X PATCH "$BASE/user/nonexistent-id-000" \
   -H "Content-Type: application/json" \
   -d '{ "age": 99 }' | python -m json.tool
 
 # ---------------------------------------------------------------------------
-# 9. Delete a user
-# ---------------------------------------------------------------------------
-curl -s -X DELETE "$BASE/user/$USER_ID" | python -m json.tool
-
-# ---------------------------------------------------------------------------
 # 10. Delete a non-existent user
 # ---------------------------------------------------------------------------
+echo -e "\n--- 10. Delete non-existent user ---"
 curl -s -X DELETE "$BASE/user/nonexistent-id-000" | python -m json.tool
+
+# ---------------------------------------------------------------------------
+# 11. Delete both users
+# ---------------------------------------------------------------------------
+echo -e "\n--- 11. Delete Alice ---"
+curl -s -X DELETE "$BASE/user/$USER1_ID" | python -m json.tool
+
+echo -e "\n--- 11. Delete Bob ---"
+curl -s -X DELETE "$BASE/user/$USER2_ID" | python -m json.tool
+
+# ---------------------------------------------------------------------------
+# 12. List users (should be empty again)
+# ---------------------------------------------------------------------------
+echo -e "\n--- 12. List users (empty) ---"
+curl -s "$BASE/users" | python -m json.tool
