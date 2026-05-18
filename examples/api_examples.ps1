@@ -4,6 +4,12 @@
 $BASE = "http://localhost:8000"
 
 # ---------------------------------------------------------------------------
+# 0. List all user IDs
+# ---------------------------------------------------------------------------
+Write-Host "`n--- 0. List all users ---"
+Invoke-RestMethod -Method Get -Uri "$BASE/users" | ConvertTo-Json -Depth 10
+
+# ---------------------------------------------------------------------------
 # 1. Create a minimal user  (required fields only)
 # ---------------------------------------------------------------------------
 Write-Host "`n--- 1. Create minimal user ---"

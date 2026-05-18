@@ -57,6 +57,12 @@ def _gql(query: str) -> list:
 # Graph CRUD operations
 # ---------------------------------------------------------------------------
 
+def list_user_ids() -> list[str]:
+    """Return the userId of every User node in the graph."""
+    rows = _gql("MATCH (u:User) RETURN u.userId")
+    return [r["u.userId"] for r in rows]
+
+
 def build_user_subgraph(profile: UserProfile) -> None:
     """Write the full user subgraph (User + all connected nodes/edges) to grafeo."""
     uid = _q(profile.userId)
