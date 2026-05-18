@@ -29,6 +29,12 @@ def _patch(path: str, payload: dict):
     return r.json()
 
 
+def _delete(path: str):
+    r = requests.delete(f"{API_BASE}{path}", timeout=5)
+    r.raise_for_status()
+    return r.json()
+
+
 # ---------------------------------------------------------------------------
 # Navigation
 # ---------------------------------------------------------------------------
@@ -216,14 +222,15 @@ def page_list():
         st.info("No users yet. Click **+ Create user** to add the first one.")
         return
 
-    header = st.columns([4, 1, 1])
+    header = st.columns([4, 1, 1, 1])
     header[0].markdown("**User ID**")
     header[1].markdown("**View**")
     header[2].markdown("**Edit**")
+    header[3].markdown("**Delete**")
     st.divider()
 
     for uid in ids:
-        row = st.columns([4, 1, 1])
+        row = st.columns([4, 1, 1, 1])
         row[0].code(uid)
         if row[1].button("View", key=f"view_{uid}"):
             _nav("view", uid)
@@ -231,6 +238,12 @@ def page_list():
         if row[2].button("Edit", key=f"edit_{uid}"):
             _nav("edit", uid)
             st.rerun()
+        if row[3].button("Delete", key=f"del_{uid}", type="primary"):
+            try:
+                _delete(f"/user/{uid}")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not delete user: {e}")
 
 
 def page_view():
