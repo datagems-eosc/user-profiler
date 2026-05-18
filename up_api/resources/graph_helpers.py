@@ -109,19 +109,20 @@ def build_user_subgraph(profile: UserProfile) -> None:
 
 
 def delete_user_subgraph(user_id: str) -> None:
-    """Remove the user and every node reachable from it."""
+    """Remove the user and every node reachable from it (leaf-first)."""
     uid = _q(user_id)
-    _run(f"""
-        MATCH (u:User {{userId: '{uid}'}})
-        OPTIONAL MATCH (u)-[:HAS_LOCATION]->(l)
-        OPTIONAL MATCH (u)-[:HAS_ORCID]->(o)
-        OPTIONAL MATCH (o)-[:HAS_KEYWORD]->(k)
-        OPTIONAL MATCH (o)-[:HAS_PUBLICATION]->(p)
-        OPTIONAL MATCH (p)-[:HAS_AUTHOR]->(a)
-        OPTIONAL MATCH (u)-[:HAS_SESSION]->(s)
-        OPTIONAL MATCH (s)-[:HAS_QUERY]->(q)
-        DETACH DELETE u, l, o, k, p, a, s, q
-    """)
+    # Each statement only runs if the MATCH finds real nodes, so nulls never reach DELETE.
+    for stmt in [
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_SESSION]->()-[:HAS_QUERY]->(q) DETACH DELETE q",
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_SESSION]->(s) DETACH DELETE s",
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_ORCID]->()-[:HAS_PUBLICATION]->()-[:HAS_AUTHOR]->(a) DETACH DELETE a",
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_ORCID]->()-[:HAS_PUBLICATION]->(p) DETACH DELETE p",
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_ORCID]->()-[:HAS_KEYWORD]->(k) DETACH DELETE k",
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_ORCID]->(o) DETACH DELETE o",
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_LOCATION]->(l) DETACH DELETE l",
+        f"MATCH (u:User {{userId: '{uid}'}}) DETACH DELETE u",
+    ]:
+        _run(stmt)
 
 
 def load_user_profile(user_id: str) -> Optional[dict]:
