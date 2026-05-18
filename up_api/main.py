@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from .resources.data_models import UserCreate, UserEdit, UserProfile
 from .resources.graph_helpers import (
     init_db,
-    list_user_ids,
+    list_users,
     build_user_subgraph,
     delete_user_subgraph,
     load_user_profile,
@@ -22,10 +22,10 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="User Profiler API", lifespan=lifespan)
 
 
-@app.get("/users", summary="List all user IDs")
-def list_users():
-    ids = list_user_ids()
-    return {"count": len(ids), "userIds": ids}
+@app.get("/users", summary="List all users")
+def get_users():
+    users = list_users()
+    return {"count": len(users), "users": users}
 
 
 @app.get("/user/{user_id}", summary="Retrieve a user by ID")

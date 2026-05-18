@@ -61,9 +61,9 @@ curl http://localhost:8000/users
 ```json
 {
   "count": 2,
-  "userIds": [
-    "3f2e1d4c-...",
-    "a1b2c3d4-..."
+  "users": [
+    { "userId": "3f2e1d4c-...", "name": "Alice", "surname": "Rossi" },
+    { "userId": "a1b2c3d4-...", "name": "Bob",   "surname": "Verdi" }
   ]
 }
 ```

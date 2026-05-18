@@ -57,10 +57,13 @@ def _gql(query: str) -> list:
 # Graph CRUD operations
 # ---------------------------------------------------------------------------
 
-def list_user_ids() -> list[str]:
-    """Return the userId of every User node in the graph."""
-    rows = _gql("MATCH (u:User) RETURN u.userId")
-    return [r["u.userId"] for r in rows]
+def list_users() -> list[dict]:
+    """Return userId, name and surname for every User node in the graph."""
+    rows = _gql("MATCH (u:User) RETURN u.userId, u.name, u.surname")
+    return [
+        {"userId": r["u.userId"], "name": r["u.name"], "surname": r["u.surname"]}
+        for r in rows
+    ]
 
 
 def build_user_subgraph(profile: UserProfile) -> None:

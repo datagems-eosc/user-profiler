@@ -214,31 +214,36 @@ def page_list():
         return
 
     count = data["count"]
-    ids = data["userIds"]
+    users = data["users"]
 
     st.caption(f"{count} user{'s' if count != 1 else ''} registered")
 
-    if not ids:
+    if not users:
         st.info("No users yet. Click **+ Create user** to add the first one.")
         return
 
-    header = st.columns([4, 1, 1, 1])
-    header[0].markdown("**User ID**")
-    header[1].markdown("**View**")
-    header[2].markdown("**Edit**")
-    header[3].markdown("**Delete**")
+    header = st.columns([2, 2, 3, 1, 1, 1])
+    header[0].markdown("**Name**")
+    header[1].markdown("**Surname**")
+    header[2].markdown("**User ID**")
+    header[3].markdown("**View**")
+    header[4].markdown("**Edit**")
+    header[5].markdown("**Delete**")
     st.divider()
 
-    for uid in ids:
-        row = st.columns([4, 1, 1, 1])
-        row[0].code(uid)
-        if row[1].button("View", key=f"view_{uid}"):
+    for u in users:
+        uid = u["userId"]
+        row = st.columns([2, 2, 3, 1, 1, 1])
+        row[0].write(u["name"])
+        row[1].write(u["surname"])
+        row[2].code(uid)
+        if row[3].button("View", key=f"view_{uid}"):
             _nav("view", uid)
             st.rerun()
-        if row[2].button("Edit", key=f"edit_{uid}"):
+        if row[4].button("Edit", key=f"edit_{uid}"):
             _nav("edit", uid)
             st.rerun()
-        if row[3].button("Delete", key=f"del_{uid}", type="primary"):
+        if row[5].button("Delete", key=f"del_{uid}", type="primary"):
             try:
                 _delete(f"/user/{uid}")
                 st.rerun()
