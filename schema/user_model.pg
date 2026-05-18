@@ -1,0 +1,54 @@
+CREATE GRAPH TYPE userProfileGraphType STRICT {
+
+  ( userType : User {
+      userId STRING,
+      name STRING,
+      surname STRING,
+      age INT32,
+      email STRING,
+      affiliation STRING
+  }) ,
+
+  ( locationType : Location {
+      city STRING,
+      country STRING
+  }) ,
+
+  ( orcidType : ORCID {
+      id STRING
+  }) ,
+
+  ( keywordType : Keyword {
+      value STRING
+  }) ,
+
+  ( publicationType : Publication {
+      title STRING,
+      doi STRING,
+      journal STRING,
+      year INT32
+  }) ,
+
+  ( authorType : Author {
+      fullName STRING
+  }) ,
+
+  ( sessionType : Session {
+      sessionId STRING,
+      startTime DATETIME,
+      endTime DATETIME OPTIONAL
+  }) ,
+
+  ( queryType : Query {
+      text STRING,
+      typedAt DATETIME OPTIONAL
+  }) ,
+
+  (: userType)-[ hasLocationType : HAS_LOCATION ]->(: locationType) ,
+  (: userType)-[ hasOrcidType : HAS_ORCID ]->(: orcidType) ,
+  (: orcidType)-[ hasKeywordType : HAS_KEYWORD ]->(: keywordType) ,
+  (: orcidType)-[ hasPublicationType : HAS_PUBLICATION ]->(: publicationType) ,
+  (: publicationType)-[ hasAuthorType : HAS_AUTHOR ]->(: authorType) ,
+  (: userType)-[ hasSessionType : HAS_SESSION ]->(: sessionType) ,
+  (: sessionType)-[ hasQueryType : HAS_QUERY ]->(: queryType )
+}
