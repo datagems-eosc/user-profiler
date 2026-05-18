@@ -115,3 +115,15 @@ Write-Host "`n--- 8. Edit non-existent user ---"
 Invoke-RestMethod -Method Patch -Uri "$BASE/user/nonexistent-id-000" `
   -ContentType "application/json" `
   -Body (@{ age = 99 } | ConvertTo-Json) | ConvertTo-Json -Depth 10
+
+# ---------------------------------------------------------------------------
+# 9. Delete a user
+# ---------------------------------------------------------------------------
+Write-Host "`n--- 9. Delete user ---"
+Invoke-RestMethod -Method Delete -Uri "$BASE/user/$userId" | ConvertTo-Json -Depth 10
+
+# ---------------------------------------------------------------------------
+# 10. Delete a non-existent user
+# ---------------------------------------------------------------------------
+Write-Host "`n--- 10. Delete non-existent user ---"
+Invoke-RestMethod -Method Delete -Uri "$BASE/user/nonexistent-id-000" | ConvertTo-Json -Depth 10

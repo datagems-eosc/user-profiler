@@ -158,6 +158,20 @@ curl -X POST http://localhost:8000/user \
 
 ---
 
+### `DELETE /user/{user_id}` — Delete a user
+
+Removes the user and all nodes connected to it (location, ORCID, publications, sessions, queries). Returns a confirmation message, or a "no such user" message if the ID is not found.
+
+```bash
+curl -X DELETE http://localhost:8000/user/3f2e1d4c-...
+```
+
+```json
+{ "message": "User '3f2e1d4c-...' deleted." }
+```
+
+---
+
 ### `PATCH /user/{user_id}` — Edit a user
 
 Partially updates an existing user. Only the fields included in the request body are changed. Returns the updated profile, or a message if the user does not exist.

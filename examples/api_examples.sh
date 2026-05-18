@@ -127,3 +127,13 @@ curl -s -X PATCH "$BASE/user/$USER_ID" \
 curl -s -X PATCH "$BASE/user/nonexistent-id-000" \
   -H "Content-Type: application/json" \
   -d '{ "age": 99 }' | python -m json.tool
+
+# ---------------------------------------------------------------------------
+# 9. Delete a user
+# ---------------------------------------------------------------------------
+curl -s -X DELETE "$BASE/user/$USER_ID" | python -m json.tool
+
+# ---------------------------------------------------------------------------
+# 10. Delete a non-existent user
+# ---------------------------------------------------------------------------
+curl -s -X DELETE "$BASE/user/nonexistent-id-000" | python -m json.tool

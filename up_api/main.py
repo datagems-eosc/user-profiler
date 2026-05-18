@@ -44,6 +44,14 @@ def create_user(payload: UserCreate):
     return profile
 
 
+@app.delete("/user/{user_id}", status_code=200, summary="Delete a user")
+def delete_user(user_id: str):
+    if load_user_profile(user_id) is None:
+        return {"message": f"No such user: '{user_id}'"}
+    delete_user_subgraph(user_id)
+    return {"message": f"User '{user_id}' deleted."}
+
+
 @app.patch("/user/{user_id}", summary="Edit an existing user")
 def edit_user(user_id: str, payload: UserEdit):
     current = load_user_profile(user_id)
