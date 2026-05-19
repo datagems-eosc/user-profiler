@@ -11,6 +11,7 @@ from .resources.graph_helpers import (
     delete_user_subgraph,
     load_user_profile,
 )
+from .resources.orcid_helpers import fetch_orcid_profile
 
 
 @asynccontextmanager
@@ -50,6 +51,11 @@ def delete_user(user_id: str):
         return {"message": f"No such user: '{user_id}'"}
     delete_user_subgraph(user_id)
     return {"message": f"User '{user_id}' deleted."}
+
+
+@app.get("/orcid/{orcid_id}", summary="Fetch raw ORCID profile")
+async def get_orcid_profile(orcid_id: str):
+    return await fetch_orcid_profile(orcid_id)
 
 
 @app.patch("/user/{user_id}", summary="Edit an existing user")
