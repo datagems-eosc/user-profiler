@@ -12,6 +12,7 @@ from .resources.graph_helpers import (
     load_user_profile,
 )
 from .resources.orcid_helpers import fetch_orcid_profile
+from .resources.LLM_helpers import generate_keywords_from_session
 
 
 @asynccontextmanager
@@ -56,6 +57,17 @@ def delete_user(user_id: str):
 @app.get("/orcid/{orcid_id}", summary="Fetch raw ORCID profile")
 async def get_orcid_profile(orcid_id: str):
     return await fetch_orcid_profile(orcid_id)
+
+
+@app.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
+def get_generated_keywords(user_id: str):
+    profile = load_user_profile(user_id)
+    if profile is None:
+        return {"message": f"No such user: '{user_id}'"}
+    result = generate_keywords_from_session(profile)
+    if result is None:
+        return {"error": "LLM API call failed — check LLM_TOKEN and LLM_API_URL env vars"}
+    return {"keywords": result}
 
 
 @app.patch("/user/{user_id}", summary="Edit an existing user")

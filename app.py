@@ -1,8 +1,12 @@
+import uuid
+from datetime import datetime, timedelta, timezone
+
 import streamlit as st
 import requests
 from requests.exceptions import ConnectionError, Timeout
 
 API_BASE = "http://localhost:8000"
+INACTIVITY_MINUTES = 5
 
 st.set_page_config(page_title="User Profiler", layout="wide")
 
@@ -11,8 +15,8 @@ st.set_page_config(page_title="User Profiler", layout="wide")
 # API client
 # ---------------------------------------------------------------------------
 
-def _get(path: str):
-    r = requests.get(f"{API_BASE}{path}", timeout=5)
+def _get(path: str, timeout: int = 5):
+    r = requests.get(f"{API_BASE}{path}", timeout=timeout)
     r.raise_for_status()
     return r.json()
 
@@ -44,7 +48,7 @@ def _nav(page: str, user_id: str = None):
     st.session_state.selected_user_id = user_id
     # Reset per-page dynamic counters when navigating away
     for key in list(st.session_state.keys()):
-        if key.startswith("_pub_count") or key.startswith("_sess_count"):
+        if key.startswith(("_pub_count", "_sess_count", "_orcid_data", "_gen_kw")):
             del st.session_state[key]
 
 
@@ -67,6 +71,51 @@ except (ConnectionError, Timeout):
         "```\nuvicorn up_api.main:app --reload\n```"
     )
     st.stop()
+
+
+# ---------------------------------------------------------------------------
+# ORCID raw-profile parser
+# ---------------------------------------------------------------------------
+
+def _parse_llm_keywords(text: str) -> list[str]:
+    """Splits LLM keyword output (comma/newline/bullet separated) into clean strings."""
+    import re
+    parts = re.split(r"[\n,]+", text)
+    return [
+        re.sub(r"^[\s\-\*\•\d\.]+", "", p).strip()
+        for p in parts
+        if re.sub(r"^[\s\-\*\•\d\.]+", "", p).strip()
+    ]
+
+
+def _parse_orcid_raw(raw: dict, orcid_id: str) -> dict:
+    kw_list = (raw.get("person") or {}).get("keywords", {}).get("keyword", [])
+    keywords = [{"value": k["content"]} for k in kw_list if k.get("content")]
+
+    pubs = []
+    groups = ((raw.get("activities-summary") or {})
+              .get("works", {}).get("group", []))
+    for group in groups:
+        for summary in group.get("work-summary", []):
+            title = ((summary.get("title") or {})
+                     .get("title", {}).get("value", ""))
+            jt = summary.get("journal-title")
+            journal = jt.get("value", "") if jt else ""
+            pd_ = summary.get("publication-date") or {}
+            yr = pd_.get("year")
+            year = int(yr["value"]) if yr and yr.get("value") else 0
+            doi = ""
+            for eid in (summary.get("external-ids") or {}).get("external-id", []):
+                if eid.get("external-id-type") == "doi":
+                    doi = eid.get("external-id-value", "")
+                    break
+            if title:
+                pubs.append({
+                    "title": title, "doi": doi,
+                    "journal": journal, "year": year, "authors": [],
+                })
+
+    return {"id": orcid_id, "keywords": keywords, "publications": pubs}
 
 
 # ---------------------------------------------------------------------------
@@ -109,58 +158,35 @@ def _render_user_form(defaults: dict = None) -> dict | None:
     with st.expander("ORCID", expanded=bool(d_orc)):
         add_orc = st.checkbox("Include ORCID", value=bool(d_orc))
         if add_orc:
+            # Seed session state from existing data when entering edit mode
+            if "_orcid_data" not in st.session_state and d_orc:
+                st.session_state._orcid_data = d_orc
+
             orcid_id = st.text_input("ORCID ID", value=d_orc.get("id", ""))
 
-            kw_default = "\n".join(k["value"] for k in d_orc.get("keywords", []))
-            kw_raw = st.text_area("Keywords (one per line)", value=kw_default)
+            if st.button("Fetch from ORCID"):
+                if orcid_id:
+                    try:
+                        raw = _get(f"/orcid/{orcid_id}")
+                        st.session_state._orcid_data = _parse_orcid_raw(raw, orcid_id)
+                        st.success("ORCID data fetched.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Could not fetch ORCID data: {e}")
+                else:
+                    st.warning("Enter an ORCID ID first.")
 
-            st.write("**Publications**")
-            if "_pub_count" not in st.session_state:
-                st.session_state._pub_count = max(1, len(d_orc.get("publications", [])))
-
-            existing_pubs = d_orc.get("publications", [])
-            pub_data = []
-            for i in range(st.session_state._pub_count):
-                ep = existing_pubs[i] if i < len(existing_pubs) else {}
-                with st.container(border=True):
-                    st.caption(f"Publication {i + 1}")
-                    pc1, pc2 = st.columns(2)
-                    with pc1:
-                        p_title = st.text_input("Title", value=ep.get("title", ""),
-                                                key=f"pub_{i}_title")
-                        p_doi = st.text_input("DOI", value=ep.get("doi", ""),
-                                              key=f"pub_{i}_doi")
-                    with pc2:
-                        p_journal = st.text_input("Journal", value=ep.get("journal", ""),
-                                                  key=f"pub_{i}_journal")
-                        p_year = st.number_input("Year", min_value=1900, max_value=2100,
-                                                 value=int(ep.get("year", 2024)),
-                                                 key=f"pub_{i}_year")
-                    author_default = ", ".join(
-                        a["fullName"] for a in ep.get("authors", [])
-                    )
-                    p_authors = st.text_input(
-                        "Authors (comma-separated)", value=author_default,
-                        key=f"pub_{i}_authors"
-                    )
-                    pub_data.append({
-                        "title": p_title, "doi": p_doi,
-                        "journal": p_journal, "year": int(p_year),
-                        "authors": [
-                            {"fullName": n.strip()}
-                            for n in p_authors.split(",") if n.strip()
-                        ],
-                    })
-
-            bc1, bc2 = st.columns(2)
-            with bc1:
-                if st.button("+ Add publication"):
-                    st.session_state._pub_count += 1
-                    st.rerun()
-            with bc2:
-                if st.button("- Remove last") and st.session_state._pub_count > 1:
-                    st.session_state._pub_count -= 1
-                    st.rerun()
+            fetched = st.session_state.get("_orcid_data")
+            if fetched:
+                kws = fetched.get("keywords", [])
+                pubs = fetched.get("publications", [])
+                if kws:
+                    st.write("**Keywords:** " + " · ".join(k["value"] for k in kws))
+                st.write(f"**Publications:** {len(pubs)} found")
+                for pub in pubs[:5]:
+                    st.caption(f"- {pub['title']} ({pub.get('year') or '?'})")
+                if len(pubs) > 5:
+                    st.caption(f"  ... and {len(pubs) - 5} more")
 
     st.divider()
 
@@ -179,14 +205,11 @@ def _render_user_form(defaults: dict = None) -> dict | None:
             payload["location"] = {"city": city, "country": country}
 
         if add_orc and orcid_id:
+            fetched = st.session_state.get("_orcid_data") or {}
             payload["orcid"] = {
                 "id": orcid_id,
-                "keywords": [
-                    {"value": k.strip()} for k in kw_raw.splitlines() if k.strip()
-                ],
-                "publications": [
-                    p for p in pub_data if p["title"] and p["doi"]
-                ],
+                "keywords": fetched.get("keywords", []),
+                "publications": fetched.get("publications", []),
             }
 
         return payload
@@ -324,6 +347,47 @@ def page_view():
                         ts = f"  `{q['typedAt']}`" if q.get("typedAt") else ""
                         st.write(f"- {q['text']}{ts}")
 
+    # Keyword generation from sessions
+    all_queries = [
+        q for s in user.get("sessions", []) for q in s.get("queries", [])
+    ]
+    if all_queries:
+        st.divider()
+        st.subheader("Generate keywords from sessions")
+
+        if st.button("Generate", key="btn_gen_kw"):
+            st.session_state._gen_kw_user = user_id
+            st.session_state.pop("_gen_kw_result", None)
+            try:
+                resp = _get(f"/user/{user_id}/generate-keywords", timeout=130)
+                if "keywords" in resp:
+                    st.session_state._gen_kw_result = resp["keywords"]
+                else:
+                    st.error(resp.get("error", "Generation failed."))
+            except Exception as e:
+                st.error(f"Could not generate keywords: {e}")
+
+        if st.session_state.get("_gen_kw_user") == user_id:
+            raw_kw = st.session_state.get("_gen_kw_result")
+            if raw_kw:
+                keywords = _parse_llm_keywords(raw_kw)
+                st.write("**Generated keywords:**")
+                for kw in keywords:
+                    st.write(f"- {kw}")
+
+                if not user.get("orcid"):
+                    st.warning("No ORCID profile on this user — set one up first to save keywords.")
+                elif st.button("Accept & save", key="btn_accept_kw", type="primary"):
+                    orcid = user["orcid"]
+                    orcid["keywords"] = [{"value": kw} for kw in keywords]
+                    try:
+                        _patch(f"/user/{user_id}", {"orcid": orcid})
+                        st.session_state.pop("_gen_kw_result", None)
+                        st.success("Keywords saved to ORCID profile.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Could not save keywords: {e}")
+
 
 def page_create():
     if st.button("← Back to list"):
@@ -375,16 +439,131 @@ def page_edit():
 
 
 # ---------------------------------------------------------------------------
-# Router
+# Session inactivity helper
 # ---------------------------------------------------------------------------
 
-page = st.session_state.page
+def _close_if_inactive(user_id: str, session: dict, sessions: list) -> bool:
+    """
+    Sets endTime on the session and PATCHes the user if the last activity
+    was more than INACTIVITY_MINUTES ago. Returns True when closed.
+    """
+    queries = session.get("queries", [])
+    last_ts_str = queries[-1].get("typedAt") if queries else session.get("startTime")
+    if not last_ts_str:
+        return False
 
-if page == "list":
-    page_list()
-elif page == "view":
-    page_view()
-elif page == "create":
-    page_create()
-elif page == "edit":
-    page_edit()
+    last_ts = datetime.fromisoformat(last_ts_str)
+    if last_ts.tzinfo is None:
+        last_ts = last_ts.replace(tzinfo=timezone.utc)
+
+    if (datetime.now(timezone.utc) - last_ts).total_seconds() > INACTIVITY_MINUTES * 60:
+        session["endTime"] = (last_ts + timedelta(minutes=INACTIVITY_MINUTES)).isoformat()
+        _patch(f"/user/{user_id}", {"sessions": sessions})
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Chat page
+# ---------------------------------------------------------------------------
+
+def page_chat():
+    st.title("Chat")
+
+    try:
+        data = _get("/users")
+    except Exception as e:
+        st.error(f"Could not load users: {e}")
+        return
+
+    users = data["users"]
+    if not users:
+        st.info("No users yet. Create one in the **Users** tab.")
+        return
+
+    labels = [f"{u['name']} {u['surname']}" for u in users]
+    idx = st.selectbox(
+        "Select user",
+        range(len(users)),
+        format_func=lambda i: labels[i],
+        key="chat_user_select",
+    )
+    selected_user_id = users[idx]["userId"]
+
+    if st.session_state.get("_chat_user_id") != selected_user_id:
+        st.session_state._chat_user_id = selected_user_id
+
+    try:
+        user = _get(f"/user/{selected_user_id}")
+    except Exception as e:
+        st.error(f"Could not load user profile: {e}")
+        return
+
+    sessions = user.get("sessions", [])
+    # Most-recent open session (no endTime)
+    active = next((s for s in reversed(sessions) if not s.get("endTime")), None)
+
+    # Close it if idle for too long
+    if active and _close_if_inactive(selected_user_id, active, sessions):
+        active = None
+
+    st.divider()
+    if active:
+        st.caption(
+            f"Session `{active['sessionId'][:8]}...`  "
+            f"started {active['startTime']}"
+        )
+        for q in active.get("queries", []):
+            with st.chat_message("user"):
+                st.write(q["text"])
+                if q.get("typedAt"):
+                    st.caption(q["typedAt"])
+    else:
+        st.caption("No active session yet. Send a message to start one.")
+
+    if prompt := st.chat_input("Type a message..."):
+        new_query = {
+            "text": prompt,
+            "typedAt": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Re-fetch to avoid overwriting concurrent changes
+        user = _get(f"/user/{selected_user_id}")
+        sessions = user.get("sessions", [])
+        active = next((s for s in reversed(sessions) if not s.get("endTime")), None)
+
+        if active:
+            active.setdefault("queries", []).append(new_query)
+        else:
+            sessions.append({
+                "sessionId": str(uuid.uuid4()),
+                "startTime": datetime.now(timezone.utc).isoformat(),
+                "queries": [new_query],
+            })
+
+        try:
+            _patch(f"/user/{selected_user_id}", {"sessions": sessions})
+        except Exception as e:
+            st.error(f"Could not save message: {e}")
+        st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Top-level tabs
+# ---------------------------------------------------------------------------
+
+tab_users, tab_chat = st.tabs(["Users", "Chat"])
+
+with tab_users:
+    page = st.session_state.page
+    if page == "list":
+        page_list()
+    elif page == "view":
+        page_view()
+    elif page == "create":
+        page_create()
+    elif page == "edit":
+        page_edit()
+
+with tab_chat:
+    page_chat()
