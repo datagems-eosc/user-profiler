@@ -17,6 +17,7 @@ def get_user_previous_queries(profile: dict) -> str:
     texts = [
         q["text"]
         for session in profile.get("sessions", [])
+        if not session.get("extracted")
         for q in session.get("queries", [])
         if q.get("text")
     ]

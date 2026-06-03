@@ -78,8 +78,14 @@ except (ConnectionError, Timeout):
 # ---------------------------------------------------------------------------
 
 def _parse_llm_keywords(text: str) -> list[str]:
-    """Splits LLM keyword output (comma/newline/bullet separated) into clean strings."""
-    import re
+    """Parses LLM keyword output — handles Python list literals and comma/newline lists."""
+    import re, ast
+    try:
+        parsed = ast.literal_eval(text.strip())
+        if isinstance(parsed, list):
+            return [str(k).strip() for k in parsed if str(k).strip()]
+    except (ValueError, SyntaxError):
+        pass
     parts = re.split(r"[\n,]+", text)
     return [
         re.sub(r"^[\s\-\*\•\d\.]+", "", p).strip()
@@ -315,14 +321,34 @@ def page_view():
         loc = user["location"]
         st.write(f"{loc['city']}, {loc['country']}")
 
+    # Keywords
+    kws = user.get("keywords", [])
+    col_kw, col_kw_btn = st.columns([5, 1])
+    with col_kw:
+        st.subheader("Keywords")
+    if kws:
+        with col_kw_btn:
+            if st.button("Clear all", key="btn_clear_kw"):
+                try:
+                    _patch(f"/user/{user_id}", {"keywords": []})
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not clear keywords: {e}")
+        tags_html = " ".join(
+            f'<span style="background:#e8f4f8; border:1px solid #aecfe0; border-radius:14px; '
+            f'padding:3px 12px; margin:3px; display:inline-block; font-size:0.9rem;">'
+            f'{k["value"]}</span>'
+            for k in kws
+        )
+        st.markdown(tags_html, unsafe_allow_html=True)
+    else:
+        st.caption("No keywords yet.")
+
     # ORCID
     if user.get("orcid"):
         st.subheader("ORCID")
         orc = user["orcid"]
         st.write(f"**ID:** {orc['id']}")
-
-        if orc.get("keywords"):
-            st.write("**Keywords:** " + " · ".join(k["value"] for k in orc["keywords"]))
 
         if orc.get("publications"):
             st.write(f"**Publications ({len(orc['publications'])}):**")
@@ -338,7 +364,8 @@ def page_view():
     if user.get("sessions"):
         st.subheader(f"Sessions ({len(user['sessions'])})")
         for s in user["sessions"]:
-            label = f"{s['sessionId']}  —  {s['startTime']}"
+            status = "  [extracted]" if s.get("extracted") else ""
+            label = f"{s['sessionId']}  —  {s['startTime']}{status}"
             with st.expander(label):
                 if s.get("endTime"):
                     st.write(f"**End:** {s['endTime']}")
@@ -346,6 +373,18 @@ def page_view():
                     for q in s["queries"]:
                         ts = f"  `{q['typedAt']}`" if q.get("typedAt") else ""
                         st.write(f"- {q['text']}{ts}")
+                if s.get("extracted"):
+                    if st.button("Mark as unseen", key=f"btn_unseen_{s['sessionId']}"):
+                        sessions = user["sessions"]
+                        for sess in sessions:
+                            if sess["sessionId"] == s["sessionId"]:
+                                sess["extracted"] = False
+                                break
+                        try:
+                            _patch(f"/user/{user_id}", {"sessions": sessions})
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Could not update session: {e}")
 
     # Keyword generation from sessions
     all_queries = [
@@ -358,16 +397,26 @@ def page_view():
         if st.button("Generate", key="btn_gen_kw"):
             st.session_state._gen_kw_user = user_id
             st.session_state.pop("_gen_kw_result", None)
-            try:
-                resp = _get(f"/user/{user_id}/generate-keywords", timeout=130)
-                if "keywords" in resp:
-                    st.session_state._gen_kw_result = resp["keywords"]
-                else:
-                    st.error(resp.get("error", "Generation failed."))
-            except Exception as e:
-                st.error(f"Could not generate keywords: {e}")
+            st.session_state.pop("_gen_kw_all_extracted", None)
+            unextracted = [
+                s for s in user.get("sessions", [])
+                if not s.get("extracted") and s.get("queries")
+            ]
+            if not unextracted:
+                st.session_state._gen_kw_all_extracted = True
+            else:
+                try:
+                    resp = _get(f"/user/{user_id}/generate-keywords", timeout=130)
+                    if "keywords" in resp:
+                        st.session_state._gen_kw_result = resp["keywords"]
+                    else:
+                        st.error(resp.get("error", "Generation failed."))
+                except Exception as e:
+                    st.error(f"Could not generate keywords: {e}")
 
         if st.session_state.get("_gen_kw_user") == user_id:
+            if st.session_state.get("_gen_kw_all_extracted"):
+                st.info("All session keywords have already been extracted.")
             raw_kw = st.session_state.get("_gen_kw_result")
             if raw_kw:
                 keywords = _parse_llm_keywords(raw_kw)
@@ -375,15 +424,18 @@ def page_view():
                 for kw in keywords:
                     st.write(f"- {kw}")
 
-                if not user.get("orcid"):
-                    st.warning("No ORCID profile on this user — set one up first to save keywords.")
-                elif st.button("Accept & save", key="btn_accept_kw", type="primary"):
-                    orcid = user["orcid"]
-                    orcid["keywords"] = [{"value": kw} for kw in keywords]
+                if st.button("Accept & save", key="btn_accept_kw", type="primary"):
+                    sessions = user.get("sessions", [])
+                    for s in sessions:
+                        if not s.get("extracted") and s.get("queries"):
+                            s["extracted"] = True
                     try:
-                        _patch(f"/user/{user_id}", {"orcid": orcid})
+                        _patch(f"/user/{user_id}", {
+                            "keywords": [{"value": kw} for kw in keywords],
+                            "sessions": sessions,
+                        })
                         st.session_state.pop("_gen_kw_result", None)
-                        st.success("Keywords saved to ORCID profile.")
+                        st.success("Keywords saved and sessions marked as extracted.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not save keywords: {e}")

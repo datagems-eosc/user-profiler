@@ -76,6 +76,10 @@ def build_user_subgraph(profile: UserProfile) -> None:
     )
     _run(f"INSERT (:User {user_p})")
 
+    for kw in profile.keywords:
+        _run(f"MATCH (u:User {{userId: '{uid}'}}) "
+             f"INSERT (u)-[:HAS_SESSION_KEYWORD]->(:Keyword {_props(value=kw.value)})")
+
     if profile.location:
         loc = profile.location
         _run(f"MATCH (u:User {{userId: '{uid}'}}) "
@@ -103,8 +107,9 @@ def build_user_subgraph(profile: UserProfile) -> None:
 
     for session in profile.sessions:
         sid = _q(session.sessionId)
+        extracted = session.extracted if session.extracted else None
         _run(f"MATCH (u:User {{userId: '{uid}'}}) "
-             f"INSERT (u)-[:HAS_SESSION]->(:Session {_props(sessionId=session.sessionId, startTime=_dt(session.startTime), endTime=_dt(session.endTime))})")
+             f"INSERT (u)-[:HAS_SESSION]->(:Session {_props(sessionId=session.sessionId, startTime=_dt(session.startTime), endTime=_dt(session.endTime), extracted=extracted)})")
 
         for query in session.queries:
             _run(f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_SESSION]->(s:Session {{sessionId: '{sid}'}}) "
@@ -117,6 +122,7 @@ def delete_user_subgraph(user_id: str) -> None:
     # Each statement only runs if the MATCH finds real nodes, so nulls never reach DELETE.
     for stmt in [
         f"MATCH (:User {{userId: '{uid}'}})-[:HAS_SESSION]->()-[:HAS_QUERY]->(q) DETACH DELETE q",
+        f"MATCH (:User {{userId: '{uid}'}})-[:HAS_SESSION_KEYWORD]->(k) DETACH DELETE k",
         f"MATCH (:User {{userId: '{uid}'}})-[:HAS_SESSION]->(s) DETACH DELETE s",
         f"MATCH (:User {{userId: '{uid}'}})-[:HAS_ORCID]->()-[:HAS_PUBLICATION]->()-[:HAS_AUTHOR]->(a) DETACH DELETE a",
         f"MATCH (:User {{userId: '{uid}'}})-[:HAS_ORCID]->()-[:HAS_PUBLICATION]->(p) DETACH DELETE p",
@@ -147,8 +153,13 @@ def load_user_profile(user_id: str) -> Optional[dict]:
         "age":         r["u.age"],
         "email":       r["u.email"],
         "affiliation": r["u.affiliation"],
-        "location": None, "orcid": None, "sessions": [],
+        "keywords": [], "location": None, "orcid": None, "sessions": [],
     }
+
+    user_kws = _gql(
+        f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_SESSION_KEYWORD]->(k) RETURN k.value"
+    )
+    profile["keywords"] = [{"value": k["k.value"]} for k in user_kws]
 
     loc = _gql(
         f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_LOCATION]->(l) "
@@ -198,7 +209,7 @@ def load_user_profile(user_id: str) -> Optional[dict]:
 
     sess_rows = _gql(
         f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_SESSION]->(s) "
-        f"RETURN s.sessionId, s.startTime, s.endTime"
+        f"RETURN s.sessionId, s.startTime, s.endTime, s.extracted"
     )
     sessions = []
     for sr in sess_rows:
@@ -211,6 +222,7 @@ def load_user_profile(user_id: str) -> Optional[dict]:
             "sessionId": sr["s.sessionId"],
             "startTime": sr["s.startTime"],
             "endTime":   sr["s.endTime"],
+            "extracted": bool(sr.get("s.extracted")) or False,
             "queries":   [{"text": q["q.text"], "typedAt": q["q.typedAt"]} for q in queries],
         })
     profile["sessions"] = sessions

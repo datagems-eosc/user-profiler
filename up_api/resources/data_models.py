@@ -45,6 +45,7 @@ class Session(BaseModel):
     sessionId: str = Field(default_factory=lambda: str(uuid.uuid4()))
     startTime: datetime
     endTime: Optional[datetime] = None
+    extracted: bool = False
     queries: list[Query] = Field(default_factory=list)
 
 
@@ -55,6 +56,7 @@ class UserProfile(BaseModel):
     age: int
     email: str
     affiliation: str
+    keywords: list[Keyword] = Field(default_factory=list)
     location: Optional[Location] = None
     orcid: Optional[ORCID] = None
     sessions: list[Session] = Field(default_factory=list)
@@ -70,6 +72,7 @@ class UserCreate(BaseModel):
     age: int
     email: str
     affiliation: str
+    keywords: list[Keyword] = Field(default_factory=list)
     location: Optional[Location] = None
     orcid: Optional[ORCID] = None
     sessions: list[Session] = Field(default_factory=list)
@@ -81,6 +84,7 @@ class UserEdit(BaseModel):
     age: Optional[int] = None
     email: Optional[str] = None
     affiliation: Optional[str] = None
+    keywords: Optional[list[Keyword]] = None
     location: Optional[Location] = None
     orcid: Optional[ORCID] = None
     sessions: Optional[list[Session]] = None

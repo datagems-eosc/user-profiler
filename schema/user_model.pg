@@ -36,7 +36,8 @@ CREATE GRAPH TYPE userProfileGraphType STRICT {
   ( sessionType : Session {
       sessionId STRING,
       startTime DATETIME,
-      endTime DATETIME OPTIONAL
+      endTime DATETIME OPTIONAL,
+      extracted BOOLEAN OPTIONAL
   }) ,
 
   ( queryType : Query {
@@ -44,6 +45,7 @@ CREATE GRAPH TYPE userProfileGraphType STRICT {
       typedAt DATETIME OPTIONAL
   }) ,
 
+  (: userType)-[ hasSessionKeywordType : HAS_SESSION_KEYWORD ]->(: keywordType) ,
   (: userType)-[ hasLocationType : HAS_LOCATION ]->(: locationType) ,
   (: userType)-[ hasOrcidType : HAS_ORCID ]->(: orcidType) ,
   (: orcidType)-[ hasKeywordType : HAS_KEYWORD ]->(: keywordType) ,
