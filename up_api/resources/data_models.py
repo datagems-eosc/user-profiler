@@ -53,7 +53,7 @@ class UserProfile(BaseModel):
     userId: str
     name: str
     surname: str
-    age: int
+    dateOfBirth: Optional[datetime] = None
     email: str
     affiliation: str
     keywords: list[Keyword] = Field(default_factory=list)
@@ -69,7 +69,7 @@ class UserProfile(BaseModel):
 class UserCreate(BaseModel):
     name: str
     surname: str
-    age: int
+    dateOfBirth: Optional[datetime] = None
     email: str
     affiliation: str
     keywords: list[Keyword] = Field(default_factory=list)
@@ -81,7 +81,7 @@ class UserCreate(BaseModel):
 class UserEdit(BaseModel):
     name: Optional[str] = None
     surname: Optional[str] = None
-    age: Optional[int] = None
+    dateOfBirth: Optional[datetime] = None
     email: Optional[str] = None
     affiliation: Optional[str] = None
     keywords: Optional[list[Keyword]] = None

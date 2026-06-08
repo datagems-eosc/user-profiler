@@ -72,7 +72,7 @@ def build_user_subgraph(profile: UserProfile) -> None:
 
     user_p = _props(
         userId=profile.userId, name=profile.name, surname=profile.surname,
-        age=profile.age, email=profile.email, affiliation=profile.affiliation,
+        dateOfBirth=_dt(profile.dateOfBirth), email=profile.email, affiliation=profile.affiliation,
     )
     _run(f"INSERT (:User {user_p})")
 
@@ -140,7 +140,7 @@ def load_user_profile(user_id: str) -> Optional[dict]:
 
     rows = _gql(
         f"MATCH (u:User {{userId: '{uid}'}}) "
-        f"RETURN u.userId, u.name, u.surname, u.age, u.email, u.affiliation"
+        f"RETURN u.userId, u.name, u.surname, u.dateOfBirth, u.email, u.affiliation"
     )
     if not rows:
         return None
@@ -150,7 +150,7 @@ def load_user_profile(user_id: str) -> Optional[dict]:
         "userId":      r["u.userId"],
         "name":        r["u.name"],
         "surname":     r["u.surname"],
-        "age":         r["u.age"],
+        "dateOfBirth": r.get("u.dateOfBirth"),
         "email":       r["u.email"],
         "affiliation": r["u.affiliation"],
         "keywords": [], "location": None, "orcid": None, "sessions": [],

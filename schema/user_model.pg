@@ -4,7 +4,7 @@ CREATE GRAPH TYPE userProfileGraphType STRICT {
       userId STRING,
       name STRING,
       surname STRING,
-      age INT32,
+      dateOfBirth DATETIME OPTIONAL,
       email STRING,
       affiliation STRING
   }) ,

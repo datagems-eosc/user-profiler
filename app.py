@@ -138,11 +138,19 @@ def _render_user_form(defaults: dict = None) -> dict | None:
     d_loc = d.get("location") or {}
 
     # -- Basic fields --
+    from datetime import date as date_type
+    _raw_dob = d.get("dateOfBirth")
+    _dob_default = None
+    if _raw_dob:
+        try:
+            _dob_default = datetime.fromisoformat(str(_raw_dob)).date()
+        except (ValueError, TypeError):
+            pass
+
     col1, col2 = st.columns(2)
     with col1:
         name = st.text_input("Name *", value=d.get("name", ""))
-        age = st.number_input("Age *", min_value=0, max_value=150,
-                              value=int(d.get("age", 0)))
+        dob = st.date_input("Date of birth", value=_dob_default)
         affiliation = st.text_input("Affiliation *", value=d.get("affiliation", ""))
     with col2:
         surname = st.text_input("Surname *", value=d.get("surname", ""))
@@ -198,14 +206,16 @@ def _render_user_form(defaults: dict = None) -> dict | None:
 
     # -- Submit --
     if st.button("Save", type="primary"):
-        if not all([name, surname, email, affiliation, age]):
+        if not all([name, surname, email, affiliation]):
             st.warning("Please fill in all required fields (marked with *).")
             return None
 
         payload: dict = {
-            "name": name, "surname": surname, "age": int(age),
+            "name": name, "surname": surname,
             "email": email, "affiliation": affiliation,
         }
+        if dob:
+            payload["dateOfBirth"] = datetime(dob.year, dob.month, dob.day).isoformat()
 
         if add_loc and city and country:
             payload["location"] = {"city": city, "country": country}
@@ -311,7 +321,9 @@ def page_view():
 
     # Basic info
     c1, c2, c3 = st.columns(3)
-    c1.metric("Age", user["age"])
+    _dob_raw = user.get("dateOfBirth")
+    _dob_display = datetime.fromisoformat(str(_dob_raw)).strftime("%d %b %Y") if _dob_raw else "—"
+    c1.metric("Date of birth", _dob_display)
     c2.metric("Email", user["email"])
     c3.metric("Affiliation", user["affiliation"])
 
