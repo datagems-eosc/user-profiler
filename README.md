@@ -1,34 +1,46 @@
 # User Profiler API
 
-A FastAPI service for managing rich user profiles on a property graph, backed by [Grafeo](https://grafeo.dev). Each profile maps directly onto the PG-schema defined in `schema/user_model.pg` and captures identity, location, ORCID research output, and session activity.
+A FastAPI service for managing rich user profiles on a property graph, backed by [Grafeo](https://grafeo.dev). Each profile maps onto the PG-schema defined in `schema/user_model.pg` and captures identity, location, ORCID research output, session activity, and session-extracted keywords.
+
+A Streamlit web UI (`app.py`) is included for interactive use.
+
+---
 
 ## Project structure
 
 ```
 user_profiler/
 ├── up_api/
-│   ├── main.py                  # FastAPI app and endpoints
+│   ├── main.py                   # FastAPI app and all endpoints
 │   └── resources/
-│       ├── data_models.py       # Pydantic models (node types + request bodies)
-│       └── graph_helpers.py     # GQL utilities and graph CRUD operations
+│       ├── data_models.py        # Pydantic models (node types + request bodies)
+│       ├── graph_helpers.py      # GQL utilities and graph CRUD operations
+│       ├── orcid_helpers.py      # ORCID public API client
+│       └── LLM_helpers.py        # LLM keyword generation
 ├── examples/
-│   ├── api_examples.sh          # curl examples (bash)
-│   └── api_examples.ps1         # curl examples (PowerShell)
+│   ├── api_examples.sh           # curl examples (bash)
+│   └── api_examples.ps1          # Invoke-RestMethod examples (PowerShell)
 ├── schema/
-│   └── user_model.pg            # PG-schema definition
+│   └── user_model.pg             # PG-schema definition
+├── app.py                        # Streamlit web UI
 └── requirements.txt
 ```
 
+---
+
 ## Data model
 
-The schema defines eight node types connected by typed edges:
+```
+User ──HAS_SESSION_KEYWORD──► Keyword          (session-extracted keywords)
+     ──HAS_LOCATION─────────► Location
+     ──HAS_ORCID────────────► ORCID ──HAS_KEYWORD─────► Keyword   (ORCID research keywords)
+                                    ──HAS_PUBLICATION──► Publication ──HAS_AUTHOR──► Author
+     ──HAS_SESSION──────────► Session ──HAS_QUERY──► Query
+```
 
-```
-User ──HAS_LOCATION──► Location
-     ──HAS_ORCID──────► ORCID ──HAS_KEYWORD─────► Keyword
-                              ──HAS_PUBLICATION──► Publication ──HAS_AUTHOR──► Author
-     ──HAS_SESSION────► Session ──HAS_QUERY──► Query
-```
+`User.keywords` (via `HAS_SESSION_KEYWORD`) stores keywords generated from the user's chat sessions and is independent of the ORCID profile.
+
+---
 
 ## Setup
 
@@ -38,21 +50,56 @@ User ──HAS_LOCATION──► Location
 pip install -r requirements.txt
 ```
 
-Start the server from the project root:
+### Environment variables
+
+The LLM keyword generation endpoint requires two environment variables:
+
+| Variable | Description |
+|---|---|
+| `LLM_TOKEN` | Bearer token for the LLM API |
+| `LLM_API_URL` | Full URL of the LLM chat completions endpoint |
+
+Set them before starting the server:
+
+```bash
+# bash
+export LLM_TOKEN="your-token"
+export LLM_API_URL="https://your-llm-host/v1/chat/completions"
+
+# PowerShell
+$env:LLM_TOKEN = "your-token"
+$env:LLM_API_URL = "https://your-llm-host/v1/chat/completions"
+```
+
+If these are not set, all other endpoints still work; only `GET /user/{id}/generate-keywords` will return an error.
+
+---
+
+## Running
+
+All commands should be run from the project root (`user_profiler/`).
+
+### 1. User Profiler API (required)
 
 ```bash
 uvicorn up_api.main:app --reload
 ```
 
-The interactive API docs are available at `http://localhost:8000/docs`.
+Runs on **http://localhost:8000**. Interactive docs: **http://localhost:8000/docs**
+
+### 2. Streamlit UI (optional)
+
+```bash
+streamlit run app.py
+```
+
+The UI will not start if the User Profiler API is not reachable.
 
 ---
 
 ## Endpoints
 
-### `GET /users` — List all user IDs
-
-Returns a JSON object containing a list of every `userId` currently stored.
+### `GET /users` — List all users
 
 ```bash
 curl http://localhost:8000/users
@@ -72,7 +119,7 @@ curl http://localhost:8000/users
 
 ### `GET /user/{user_id}` — Retrieve a user
 
-Returns the full profile for the given `userId`, or a message if the user does not exist.
+Returns the full profile, or `{"message": "No such user: '...'"}` if not found.
 
 ```bash
 curl http://localhost:8000/user/3f2e1d4c-...
@@ -81,12 +128,13 @@ curl http://localhost:8000/user/3f2e1d4c-...
 ```json
 {
   "userId": "3f2e1d4c-...",
-  "name": "Bob",
-  "surname": "Verdi",
-  "age": 41,
-  "email": "bob.verdi@example.com",
-  "affiliation": "CNR",
-  "location": { "city": "Rome", "country": "Italy" },
+  "name": "Alice",
+  "surname": "Rossi",
+  "age": 34,
+  "email": "alice.rossi@example.com",
+  "affiliation": "University of Milan",
+  "keywords": [],
+  "location": null,
   "orcid": null,
   "sessions": []
 }
@@ -96,9 +144,9 @@ curl http://localhost:8000/user/3f2e1d4c-...
 
 ### `POST /user` — Create a user
 
-Creates a new user. A `userId` (UUID) is generated automatically. Only `name`, `surname`, `age`, `email`, and `affiliation` are required; all other fields are optional.
+A `userId` (UUID) is generated automatically. Only `name`, `surname`, `age`, `email`, and `affiliation` are required.
 
-**Minimal request:**
+**Minimal:**
 
 ```bash
 curl -X POST http://localhost:8000/user \
@@ -112,7 +160,7 @@ curl -X POST http://localhost:8000/user \
   }'
 ```
 
-**Full request** (with location, ORCID, publications, and a session):
+**Full** (with location, ORCID, session, and pre-set keywords):
 
 ```bash
 curl -X POST http://localhost:8000/user \
@@ -123,36 +171,28 @@ curl -X POST http://localhost:8000/user \
     "age": 41,
     "email": "bob.verdi@example.com",
     "affiliation": "CNR",
+    "keywords": [{ "value": "knowledge graphs" }],
     "location": { "city": "Rome", "country": "Italy" },
     "orcid": {
       "id": "0000-0002-1825-0097",
-      "keywords": [
-        { "value": "machine learning" },
-        { "value": "knowledge graphs" }
-      ],
-      "publications": [
-        {
-          "title": "Graph-Based User Profiling",
-          "doi": "10.1000/xyz123",
-          "journal": "Data Science Journal",
-          "year": 2023,
-          "authors": [
-            { "fullName": "Bob Verdi" },
-            { "fullName": "Alice Rossi" }
-          ]
-        }
-      ]
+      "keywords": [{ "value": "machine learning" }],
+      "publications": [{
+        "title": "Graph-Based User Profiling",
+        "doi": "10.1000/xyz123",
+        "journal": "Data Science Journal",
+        "year": 2023,
+        "authors": [{ "fullName": "Bob Verdi" }]
+      }]
     },
-    "sessions": [
-      {
-        "sessionId": "sess-001",
-        "startTime": "2024-03-10T09:00:00",
-        "endTime": "2024-03-10T09:45:00",
-        "queries": [
-          { "text": "knowledge graph embedding", "typedAt": "2024-03-10T09:05:00" }
-        ]
-      }
-    ]
+    "sessions": [{
+      "sessionId": "sess-001",
+      "startTime": "2024-03-10T09:00:00",
+      "endTime":   "2024-03-10T09:45:00",
+      "extracted": false,
+      "queries": [
+        { "text": "knowledge graph embedding", "typedAt": "2024-03-10T09:05:00" }
+      ]
+    }]
   }'
 ```
 
@@ -160,7 +200,7 @@ curl -X POST http://localhost:8000/user \
 
 ### `DELETE /user/{user_id}` — Delete a user
 
-Removes the user and all nodes connected to it (location, ORCID, publications, sessions, queries). Returns a confirmation message, or a "no such user" message if the ID is not found.
+Removes the user and all connected nodes (keywords, location, ORCID, publications, sessions, queries).
 
 ```bash
 curl -X DELETE http://localhost:8000/user/3f2e1d4c-...
@@ -174,26 +214,71 @@ curl -X DELETE http://localhost:8000/user/3f2e1d4c-...
 
 ### `PATCH /user/{user_id}` — Edit a user
 
-Partially updates an existing user. Only the fields included in the request body are changed. Returns the updated profile, or a message if the user does not exist.
-
-`PATCH` replaces nested objects (e.g. `location`, `sessions`) wholesale — to append a session rather than replace the list, fetch the current profile first and re-submit the full sessions array.
+Partially updates a user. Only fields present in the body are changed. Nested objects (`location`, `orcid`, `sessions`, `keywords`) are replaced wholesale — to append a session, fetch the current profile first and re-submit the full array.
 
 ```bash
 curl -X PATCH http://localhost:8000/user/3f2e1d4c-... \
   -H "Content-Type: application/json" \
-  -d '{
-    "age": 42,
-    "affiliation": "CNR — Institute of Cognitive Sciences"
-  }'
+  -d '{ "age": 42, "affiliation": "CNR - Institute of Cognitive Sciences" }'
 ```
 
 ---
 
-## Examples
+### `GET /orcid/{orcid_id}` — Fetch a raw ORCID profile
 
-Ready-to-run example scripts covering all endpoints and edge cases are in the `examples/` folder:
+Fetches the full public ORCID record for the given ORCID iD directly from the ORCID public API.
+
+```bash
+curl http://localhost:8000/orcid/0000-0001-6092-6831
+```
+
+Returns the raw ORCID JSON. Used internally by the Streamlit UI to auto-populate ORCID fields when creating or editing a user.
+
+---
+
+### `GET /user/{user_id}/generate-keywords` — Generate keywords from sessions
+
+Calls the configured LLM with all queries from sessions not yet marked `extracted: true`. Returns the raw LLM response.
+
+```bash
+curl http://localhost:8000/user/3f2e1d4c-.../generate-keywords
+```
+
+```json
+{ "keywords": "['knowledge graphs', 'graph embedding', 'GNN']" }
+```
+
+Returns `{"all_extracted": true}` if every session has already been extracted. Returns an error string if the LLM is unreachable or misconfigured.
+
+The Streamlit UI parses this response, displays the keywords, and lets the user accept them — which saves them to `user.keywords` and marks the contributing sessions as `extracted: true`.
+
+---
+
+## Testing
+
+### Interactive docs
+
+The FastAPI automatic docs expose every endpoint with a built-in request builder:
+
+```
+http://localhost:8000/docs
+```
+
+### Example scripts
+
+Ready-to-run scripts that exercise all endpoints end-to-end are in `examples/`. Each script starts with an empty database, creates two users, runs through all operations, and deletes both users so the database is clean at the end.
 
 | File | Shell |
 |---|---|
 | `examples/api_examples.sh` | bash / WSL / Git Bash |
-| `examples/api_examples.ps1` | PowerShell (Windows) |
+| `examples/api_examples.ps1` | PowerShell |
+
+Run from the project root:
+
+```bash
+# bash
+bash examples/api_examples.sh
+
+# PowerShell
+.\examples\api_examples.ps1
+```
