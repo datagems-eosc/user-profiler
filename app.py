@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import streamlit as st
 import requests
@@ -138,7 +138,6 @@ def _render_user_form(defaults: dict = None) -> dict | None:
     d_loc = d.get("location") or {}
 
     # -- Basic fields --
-    from datetime import date as date_type
     _raw_dob = d.get("dateOfBirth")
     _dob_default = None
     if _raw_dob:
@@ -150,7 +149,8 @@ def _render_user_form(defaults: dict = None) -> dict | None:
     col1, col2 = st.columns(2)
     with col1:
         name = st.text_input("Name *", value=d.get("name", ""))
-        dob = st.date_input("Date of birth", value=_dob_default)
+        dob = st.date_input("Date of birth", value=_dob_default,
+                            min_value=date(1909, 1, 1), max_value=date.today())
         affiliation = st.text_input("Affiliation *", value=d.get("affiliation", ""))
     with col2:
         surname = st.text_input("Surname *", value=d.get("surname", ""))
