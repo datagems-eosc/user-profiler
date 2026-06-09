@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
+import os
 import uuid
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from .resources.data_models import UserCreate, UserEdit, UserProfile
 from .resources.graph_helpers import (
@@ -21,7 +23,25 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="User Profiler API", lifespan=lifespan)
+app = FastAPI(
+    title="User Profiler API",
+    version="1.0.0",
+    openapi_url="/api/v1/openapi.json",
+    docs_url="/api/v1/swagger",
+    redoc_url="/api/v1/redoc",
+    root_path=os.getenv("ROOT_PATH", ""),
+    lifespan=lifespan,
+)
+
+
+@app.get("/", include_in_schema=False)
+async def home():
+    return RedirectResponse(url="/api/v1")
+
+
+@app.get("/api/v1")
+async def api_home():
+    return {"message": "User Profiler API V1 is running"}
 
 
 @app.get("/users", summary="List all users")
