@@ -5,10 +5,26 @@ import streamlit as st
 import requests
 from requests.exceptions import ConnectionError, Timeout
 
-API_BASE = "http://localhost:8000"
 INACTIVITY_MINUTES = 5
 
+_API_OPTIONS = {
+    "Local": "http://localhost:8000",
+    "DataGEMS (dev)": "https://datagems-dev.scayle.es/up",
+}
+
 st.set_page_config(page_title="User Profiler", layout="wide")
+
+with st.sidebar:
+    st.markdown("### API endpoint")
+    _api_choice = st.radio(
+        "API endpoint",
+        list(_API_OPTIONS.keys()),
+        key="api_choice",
+        label_visibility="collapsed",
+    )
+    st.caption(_API_OPTIONS[_api_choice])
+
+API_BASE = _API_OPTIONS[_api_choice]
 
 
 # ---------------------------------------------------------------------------
