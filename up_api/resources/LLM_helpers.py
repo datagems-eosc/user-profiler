@@ -56,4 +56,4 @@ def generate_keywords_from_session(context: dict, model_choice: str = "llama-3.3
         return res
     except requests.exceptions.RequestException as e:
         print("Error while calling API:", e)
-        return None
+        return ""
