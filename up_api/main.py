@@ -59,6 +59,14 @@ def get_user(user_id: str):
     return profile
 
 
+@app.get("/user/{user_id}/profile", summary="Retrieve a portable interest profile for cross-service consumption")
+def get_user_interest_profile(user_id: str):
+    profile = load_user_profile(user_id)
+    if profile is None:
+        return {"message": f"No such user: '{user_id}'"}
+    return build_interest_profile(profile)
+
+
 @app.post("/user", status_code=201, summary="Create a new user")
 def create_user(payload: UserCreate):
     user_id = str(uuid.uuid4())
