@@ -16,7 +16,8 @@ user_profiler/
 │       ├── data_models.py        # Pydantic models (node types + request bodies)
 │       ├── graph_helpers.py      # GQL utilities and graph CRUD operations
 │       ├── orcid_helpers.py      # ORCID public API client
-│       └── LLM_helpers.py        # LLM keyword generation
+│       ├── LLM_helpers.py        # LLM keyword generation
+│       └── profile_helpers.py    # Portable interest-profile shaping
 ├── examples/
 │   ├── api_examples.sh           # curl examples (bash)
 │   └── api_examples.ps1          # Invoke-RestMethod examples (PowerShell)
@@ -139,6 +140,28 @@ curl http://localhost:8000/user/3f2e1d4c-...
   "sessions": []
 }
 ```
+
+---
+
+### `GET /user/{user_id}/profile` — Retrieve a portable interest profile
+
+Returns a trimmed, generic profile meant for consumption by other services on the platform, rather than the full internal representation returned by `GET /user/{user_id}`. It drops PII (`email`, `dateOfBirth`) and the raw session/query log, and merges session-extracted keywords with ORCID research keywords into a single deduplicated list.
+
+```bash
+curl http://localhost:8000/user/3f2e1d4c-.../profile
+```
+
+```json
+{
+  "userId": "3f2e1d4c-...",
+  "keywords": ["knowledge graphs", "machine learning"],
+  "location": { "city": "Rome", "country": "Italy" },
+  "affiliation": "CNR",
+  "orcid": { "id": "0000-0002-1825-0097" }
+}
+```
+
+Returns `{"message": "No such user: '...'"}` if not found, same as `GET /user/{user_id}`.
 
 ---
 
