@@ -15,6 +15,7 @@ from .resources.graph_helpers import (
 )
 from .resources.orcid_helpers import fetch_orcid_profile
 from .resources.LLM_helpers import generate_keywords_from_session
+from .resources.profile_helpers import build_interest_profile
 
 
 @asynccontextmanager
