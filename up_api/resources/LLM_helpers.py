@@ -24,7 +24,17 @@ def get_user_previous_queries(profile: dict) -> str:
     return " | ".join(texts)
 
 
-def generate_keywords_from_session(context: dict, model_choice: str = "llama-3.3") -> str:
+# hard coded the one of the installed LLM
+def generate_keywords_from_session(context: dict, model_choice: str = "qwen3") -> str:
+
+    '''
+    TO-DO:
+        - automatically extract the LLM to use from the API call
+        - find a way to use the best one int erms of performances
+
+    Probably creating a separate function
+    '''
+
     queries_from_session = get_user_previous_queries(context)
     payload = {
             "model": model_choice,
