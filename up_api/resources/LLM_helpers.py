@@ -63,7 +63,20 @@ def generate_keywords_from_session(context: dict, model_choice: str = "qwen3") -
         response = requests.post(url=LLM_API_URL, headers=HEADERS, data=json_data, verify=False, timeout=120)
         response.raise_for_status()
         res = response.json()['choices'][0]['message']['content']
-        return res
+        return res    
     except requests.exceptions.RequestException as e:
         print("Error while calling API:", e)
         return ""
+
+
+
+# function to automatically retrive the list of available LLMs' ID
+def get_available_models() -> list[str]:
+    '''
+    This function will retrive via http request the available models to use inside
+    the keywords generation function
+
+    Return:
+        - A list of the strings, each one represent the id of an available LLM
+    '''
+    pass
