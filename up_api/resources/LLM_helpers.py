@@ -25,19 +25,13 @@ def get_user_previous_queries(profile: dict) -> str:
 
 
 # hard coded the one of the installed LLM
-def generate_keywords_from_session(context: dict, model_choice: str = "qwen3") -> str:
+def generate_keywords_from_session(context: dict, model_choice: str = "kimi-k2.6") -> str:
 
-    '''
-    TO-DO:
-        - automatically extract the LLM to use from the API call
-        - find a way to use the best one int erms of performances
-
-    Probably creating a separate function
-    '''
+    model_available = get_available_models(model_choice)
 
     queries_from_session = get_user_previous_queries(context)
     payload = {
-            "model": model_choice,
+            "model": model_available,
             "messages": [
                 {
                     "role":"system",
@@ -71,12 +65,36 @@ def generate_keywords_from_session(context: dict, model_choice: str = "qwen3") -
 
 
 # function to automatically retrive the list of available LLMs' ID
-def get_available_models() -> list[str]:
+def get_available_models(model_choice) -> str:
     '''
     This function will retrive via http request the available models to use inside
     the keywords generation function
 
+    input:
+        - model_choice model selected by user or defualt model
+
     Return:
-        - A list of the strings, each one represent the id of an available LLM
+        - ID of the available model: either the first available or the one selected
     '''
-    pass
+
+    api = 'api/models'
+    ip, port, _ = str(LLM_API_URL).partition('32443/') 
+    url = ip + port + api
+
+    try:
+        response = requests.get(
+        url,
+        headers= HEADERS,
+        verify=False,
+        timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        models = [model["id"] for model in data["data"]]
+        model_available = model_choice if model_choice in models else (models[0] if models else model_choice)
+        return model_available
+    
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Could not reach models endpoint: {e}")
+        return []
