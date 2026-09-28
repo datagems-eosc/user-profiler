@@ -1,4 +1,5 @@
 import json, requests, os
+from urllib.parse import urlsplit
 
 TOKEN = os.getenv('LLM_TOKEN', '')
 LLM_API_URL = os.getenv('LLM_API_URL', '')
@@ -77,9 +78,9 @@ def get_available_models(model_choice) -> str:
         - ID of the available model: either the first available or the one selected
     '''
 
-    api = 'api/models'
-    ip, port, _ = str(LLM_API_URL).partition('32443/') 
-    url = ip + port + api
+    # models endpoint lives at <scheme>://<host[:port]>/api/models, whatever the chat path is
+    parts = urlsplit(LLM_API_URL)
+    url = f"{parts.scheme}://{parts.netloc}/api/models"
 
     try:
         response = requests.get(
@@ -97,4 +98,4 @@ def get_available_models(model_choice) -> str:
         
     except requests.exceptions.RequestException as e:
         print(f"Could not reach models endpoint: {e}")
-        return []
+        return model_choice
