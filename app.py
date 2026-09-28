@@ -249,6 +249,16 @@ def _render_user_form(defaults: dict = None) -> dict | None:
     return None
 
 
+def _render_keyword_tags(kws: list[dict]) -> None:
+    tags_html = " ".join(
+        f'<span style="background:#e8f4f8; border:1px solid #aecfe0; border-radius:14px; '
+        f'padding:3px 12px; margin:3px; display:inline-block; font-size:0.9rem;">'
+        f'{k["value"]}</span>'
+        for k in kws
+    )
+    st.markdown(tags_html, unsafe_allow_html=True)
+
+
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
@@ -364,13 +374,7 @@ def page_view():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not clear keywords: {e}")
-        tags_html = " ".join(
-            f'<span style="background:#e8f4f8; border:1px solid #aecfe0; border-radius:14px; '
-            f'padding:3px 12px; margin:3px; display:inline-block; font-size:0.9rem;">'
-            f'{k["value"]}</span>'
-            for k in kws
-        )
-        st.markdown(tags_html, unsafe_allow_html=True)
+        _render_keyword_tags(kws)
     else:
         st.caption("No keywords yet.")
 
@@ -582,6 +586,15 @@ def page_chat():
     except Exception as e:
         st.error(f"Could not load user profile: {e}")
         return
+
+    session_kws = user.get("keywords", [])
+    orcid_kws = (user.get("orcid") or {}).get("keywords", [])
+    if session_kws:
+        st.markdown("**Session keywords**")
+        _render_keyword_tags(session_kws)
+    if orcid_kws:
+        st.markdown("**ORCID keywords**")
+        _render_keyword_tags(orcid_kws)
 
     sessions = user.get("sessions", [])
     # Most-recent open session (no endTime)
