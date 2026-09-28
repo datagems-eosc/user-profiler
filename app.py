@@ -315,12 +315,14 @@ def page_view():
 
     try:
         user = _get(f"/user/{user_id}")
+    except requests.HTTPError as e:
+        if e.response.status_code == 404:
+            st.warning(e.response.json()["detail"])
+        else:
+            st.error(f"Could not load user: {e}")
+        return
     except Exception as e:
         st.error(f"Could not load user: {e}")
-        return
-
-    if "message" in user:
-        st.warning(user["message"])
         return
 
     # Header
@@ -499,12 +501,14 @@ def page_edit():
 
     try:
         current = _get(f"/user/{user_id}")
+    except requests.HTTPError as e:
+        if e.response.status_code == 404:
+            st.warning(e.response.json()["detail"])
+        else:
+            st.error(f"Could not load user: {e}")
+        return
     except Exception as e:
         st.error(f"Could not load user: {e}")
-        return
-
-    if "message" in current:
-        st.warning(current["message"])
         return
 
     payload = _render_user_form(defaults=current)

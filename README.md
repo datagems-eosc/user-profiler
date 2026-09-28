@@ -120,7 +120,7 @@ curl http://localhost:8000/users
 
 ### `GET /user/{user_id}` — Retrieve a user
 
-Returns the full profile, or `{"message": "No such user: '...'"}` if not found.
+Returns the full profile, or HTTP 404 with `{"detail": "No such user: '...'"}` if not found. The same 404 applies to every `/user/{user_id}` endpoint below.
 
 ```bash
 curl http://localhost:8000/user/3f2e1d4c-...
@@ -161,7 +161,7 @@ curl http://localhost:8000/user/3f2e1d4c-.../profile
 }
 ```
 
-Returns `{"message": "No such user: '...'"}` if not found, same as `GET /user/{user_id}`.
+Returns HTTP 404 if not found, same as `GET /user/{user_id}`.
 
 ---
 

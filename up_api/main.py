@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 import os
 import uuid
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 
 from .resources.data_models import UserCreate, UserEdit, UserProfile
@@ -35,6 +35,13 @@ app = FastAPI(
 )
 
 
+def _require_user(user_id: str) -> dict:
+    profile = load_user_profile(user_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail=f"No such user: '{user_id}'")
+    return profile
+
+
 @app.get("/", include_in_schema=False)
 async def home():
     return RedirectResponse(url="/api/v1")
@@ -53,18 +60,12 @@ def get_users():
 
 @app.get("/user/{user_id}", summary="Retrieve a user by ID")
 def get_user(user_id: str):
-    profile = load_user_profile(user_id)
-    if profile is None:
-        return {"message": f"No such user: '{user_id}'"}
-    return profile
+    return _require_user(user_id)
 
 
 @app.get("/user/{user_id}/profile", summary="Retrieve a portable interest profile for cross-service consumption")
 def get_user_interest_profile(user_id: str):
-    profile = load_user_profile(user_id)
-    if profile is None:
-        return {"message": f"No such user: '{user_id}'"}
-    return build_interest_profile(profile)
+    return build_interest_profile(_require_user(user_id))
 
 
 @app.post("/user", status_code=201, summary="Create a new user")
@@ -77,8 +78,7 @@ def create_user(payload: UserCreate):
 
 @app.delete("/user/{user_id}", status_code=200, summary="Delete a user")
 def delete_user(user_id: str):
-    if load_user_profile(user_id) is None:
-        return {"message": f"No such user: '{user_id}'"}
+    _require_user(user_id)
     delete_user_subgraph(user_id)
     return {"message": f"User '{user_id}' deleted."}
 
@@ -90,9 +90,7 @@ async def get_orcid_profile(orcid_id: str):
 
 @app.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
 def get_generated_keywords(user_id: str):
-    profile = load_user_profile(user_id)
-    if profile is None:
-        return {"message": f"No such user: '{user_id}'"}
+    profile = _require_user(user_id)
     result = generate_keywords_from_session(profile)
     if result is None:
         return {"error": "LLM API call failed — check LLM_TOKEN and LLM_API_URL env vars"}
@@ -101,9 +99,7 @@ def get_generated_keywords(user_id: str):
 
 @app.patch("/user/{user_id}", summary="Edit an existing user")
 def edit_user(user_id: str, payload: UserEdit):
-    current = load_user_profile(user_id)
-    if current is None:
-        return {"message": f"No such user: '{user_id}'"}
+    current = _require_user(user_id)
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         current[field] = value
