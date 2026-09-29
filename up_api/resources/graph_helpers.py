@@ -78,7 +78,8 @@ def build_user_subgraph(profile: UserProfile) -> None:
 
     for kw in profile.keywords:
         _run(f"MATCH (u:User {{userId: '{uid}'}}) "
-             f"INSERT (u)-[:HAS_SESSION_KEYWORD]->(:Keyword {_props(value=kw.value)})")
+             f"INSERT (u)-[:HAS_SESSION_KEYWORD]->(:Keyword "
+             f"{_props(value=kw.value, addedAt=_dt(kw.addedAt), lastSeenAt=_dt(kw.lastSeenAt))})")
 
     if profile.location:
         loc = profile.location
@@ -157,9 +158,12 @@ def load_user_profile(user_id: str) -> Optional[dict]:
     }
 
     user_kws = _gql(
-        f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_SESSION_KEYWORD]->(k) RETURN k.value"
+        f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_SESSION_KEYWORD]->(k) RETURN k.value, k.addedAt, k.lastSeenAt"
     )
-    profile["keywords"] = [{"value": k["k.value"]} for k in user_kws]
+    profile["keywords"] = [
+        {"value": k["k.value"], "addedAt": k.get("k.addedAt"), "lastSeenAt": k.get("k.lastSeenAt")}
+        for k in user_kws
+    ]
 
     loc = _gql(
         f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_LOCATION]->(l) "

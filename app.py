@@ -250,13 +250,28 @@ def _render_user_form(defaults: dict = None) -> dict | None:
 
 
 def _render_keyword_tags(kws: list[dict]) -> None:
-    tags_html = " ".join(
-        f'<span style="background:#e8f4f8; border:1px solid #aecfe0; border-radius:14px; '
-        f'padding:3px 12px; margin:3px; display:inline-block; font-size:0.9rem;">'
-        f'{k["value"]}</span>'
-        for k in kws
-    )
-    st.markdown(tags_html, unsafe_allow_html=True)
+    """
+    Keywords as tags. When they carry a "weight" (from GET /user/{id}/keywords), the
+    weight is shown and the tag fades as it decays; expired ones are struck through.
+    """
+    def tag(k: dict) -> str:
+        weight = k.get("weight")
+        label = k["value"] if weight is None else f'{k["value"]} · {weight:.2f}'
+        opacity = 1.0 if weight is None else max(0.35, weight)
+        strike = "text-decoration:line-through;" if k.get("expired") else ""
+        return (f'<span style="background:#e8f4f8; border:1px solid #aecfe0; border-radius:14px; '
+                f'padding:3px 12px; margin:3px; display:inline-block; font-size:0.9rem; '
+                f'opacity:{opacity}; {strike}">{label}</span>')
+
+    st.markdown(" ".join(tag(k) for k in kws), unsafe_allow_html=True)
+
+
+def _weighted_keywords(user_id: str) -> list[dict] | None:
+    """Keywords with weights, or None on API versions without the endpoint."""
+    try:
+        return _get(f"/user/{user_id}/keywords")["keywords"]
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +389,15 @@ def page_view():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not clear keywords: {e}")
-        _render_keyword_tags(kws)
+        weighted = _weighted_keywords(user_id)
+        session_weighted = [k for k in weighted or [] if k["source"] == "session"]
+        if session_weighted:
+            _render_keyword_tags(session_weighted)
+            st.caption("Weight halves every 30 days (by default) since the keyword was last extracted. "
+                       "Struck-through keywords have expired: they are no longer sent to other services, "
+                       "until they are extracted again.")
+        else:
+            _render_keyword_tags(kws)
     else:
         st.caption("No keywords yet.")
 
@@ -456,9 +479,11 @@ def page_view():
             if raw_kw:
                 # Older API versions return the raw LLM text instead of a list
                 keywords = _parse_llm_keywords(raw_kw) if isinstance(raw_kw, str) else raw_kw
+                existing = {k["value"].lower() for k in user.get("keywords", [])}
                 st.write("**Generated keywords:**")
                 for kw in keywords:
-                    st.write(f"- {kw}")
+                    note = "already saved: its weight will be refreshed" if kw.lower() in existing else "**new**"
+                    st.write(f"- {kw} ({note})")
 
                 if st.button("Accept & save", key="btn_accept_kw", type="primary"):
                     sessions = user.get("sessions", [])
@@ -466,15 +491,27 @@ def page_view():
                         if not s.get("extracted") and s.get("queries"):
                             s["extracted"] = True
                     try:
-                        _patch(f"/user/{user_id}", {
-                            "keywords": [{"value": kw} for kw in keywords],
-                            "sessions": sessions,
-                        })
+                        try:
+                            # Appends new keywords and refreshes the ones already saved
+                            res = _post(f"/user/{user_id}/keywords", {"keywords": keywords})
+                            _patch(f"/user/{user_id}", {"sessions": sessions})
+                            msg = f"{len(res['added'])} new keyword(s) added, {len(res['refreshed'])} refreshed."
+                        except requests.HTTPError as e:
+                            if e.response.status_code not in (404, 405):
+                                raise
+                            # Older API without the append endpoint: merge here instead of overwriting
+                            merged = user.get("keywords", []) + [
+                                {"value": kw} for kw in keywords if kw.lower() not in existing]
+                            _patch(f"/user/{user_id}", {"keywords": merged, "sessions": sessions})
+                            msg = "Keywords appended (older API: no timestamps)."
                         st.session_state.pop("_gen_kw_result", None)
-                        st.success("Keywords saved and sessions marked as extracted.")
+                        st.session_state._gen_kw_saved = msg + " Sessions marked as extracted."
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not save keywords: {e}")
+
+            if saved := st.session_state.pop("_gen_kw_saved", None):
+                st.success(saved)
 
 
 def page_create():

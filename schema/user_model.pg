@@ -19,7 +19,9 @@ CREATE GRAPH TYPE userProfileGraphType STRICT {
   }) ,
 
   ( keywordType : Keyword {
-      value STRING
+      value STRING,
+      addedAt DATETIME OPTIONAL,
+      lastSeenAt DATETIME OPTIONAL
   }) ,
 
   ( publicationType : Publication {

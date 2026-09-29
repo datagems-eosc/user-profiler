@@ -41,6 +41,20 @@ User ──HAS_SESSION_KEYWORD──► Keyword          (session-extracted keyw
 
 `User.keywords` (via `HAS_SESSION_KEYWORD`) stores keywords generated from the user's chat sessions and is independent of the ORCID profile.
 
+### Keyword ageing
+
+Session keywords carry two timestamps: `addedAt` (first saved) and `lastSeenAt` (last time the LLM extracted them). Their **weight** decays with the time since `lastSeenAt`: 1.0 when just seen, halving every `KEYWORD_HALF_LIFE_DAYS`. Re-extracting a keyword refreshes it back to 1.0, so recurring interests stay strong. ORCID keywords have no timestamps and get the constant `ORCID_KEYWORD_WEIGHT`.
+
+Keywords whose weight drops below `KEYWORD_MIN_WEIGHT` **expire**. They stay in the graph and in `GET /user/{id}`, but `GET /user/{id}/profile` stops returning them, so other services no longer use them. Extracting them again brings them back.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `KEYWORD_HALF_LIFE_DAYS` | `30` | Days for a session keyword's weight to halve |
+| `KEYWORD_MIN_WEIGHT` | `0.1` | Below this weight a keyword expires (about 100 days with the default half-life) |
+| `ORCID_KEYWORD_WEIGHT` | `0.5` | Constant weight of ORCID keywords |
+
+Keywords saved before timestamps existed are stamped the next time the user's profile is saved (any edit, including new chat messages).
+
 ---
 
 ## Setup
@@ -157,7 +171,9 @@ curl http://localhost:8000/user/3f2e1d4c-...
 
 ### `GET /user/{user_id}/profile` — Retrieve a portable interest profile
 
-Returns a trimmed, generic profile meant for consumption by other services on the platform, rather than the full internal representation returned by `GET /user/{user_id}`. It drops PII (`email`, `dateOfBirth`) and the raw session/query log, and merges session-extracted keywords with ORCID research keywords into a single deduplicated list.
+Returns a trimmed, generic profile meant for consumption by other services on the platform, rather than the full internal representation returned by `GET /user/{user_id}`. It drops PII (`email`, `dateOfBirth`) and the raw session/query log, and merges session-extracted keywords with ORCID research keywords into a single deduplicated list, **strongest first** (see [Keyword ageing](#keyword-ageing)). Expired keywords are left out.
+
+`keywords` is a plain list, so consumers that ignore weights still get the priority order. `weightedKeywords` carries the weights.
 
 ```bash
 curl http://localhost:8000/user/3f2e1d4c-.../profile
@@ -167,6 +183,10 @@ curl http://localhost:8000/user/3f2e1d4c-.../profile
 {
   "userId": "3f2e1d4c-...",
   "keywords": ["knowledge graphs", "machine learning"],
+  "weightedKeywords": [
+    { "value": "knowledge graphs", "weight": 0.871, "source": "session" },
+    { "value": "machine learning", "weight": 0.5, "source": "orcid" }
+  ],
   "location": { "city": "Rome", "country": "Italy" },
   "affiliation": "CNR",
   "orcid": { "id": "0000-0002-1825-0097" }
@@ -285,7 +305,38 @@ curl http://localhost:8000/user/3f2e1d4c-.../generate-keywords
 
 Returns `{"keywords": []}` without calling the LLM if every session has already been extracted. Returns HTTP 502 if the LLM is unreachable, misconfigured, or replies with invalid output.
 
-The Streamlit UI parses this response, displays the keywords, and lets the user accept them — which saves them to `user.keywords` and marks the contributing sessions as `extracted: true`.
+This endpoint only proposes keywords; nothing is saved. The Streamlit UI shows which ones are new, and **Accept & save** appends them with `POST /user/{user_id}/keywords` and marks the contributing sessions as `extracted: true`.
+
+---
+
+### `POST /user/{user_id}/keywords` — Append session keywords
+
+Adds keywords without touching the existing ones. A keyword already saved (same value, ignoring case) is not duplicated: its `lastSeenAt` is refreshed, restoring its full weight.
+
+```bash
+curl -X POST http://localhost:8000/user/3f2e1d4c-.../keywords \
+  -H "Content-Type: application/json" \
+  -d '{ "keywords": ["GNN", "knowledge graphs"] }'
+```
+
+```json
+{ "added": ["GNN"], "refreshed": ["knowledge graphs"] }
+```
+
+Use this rather than `PATCH /user/{id}` with `keywords`, which replaces the whole list. A `PATCH` still keeps the timestamps of keywords that stay in the list.
+
+---
+
+### `GET /user/{user_id}/keywords` — Keywords with their weights
+
+All session and ORCID keywords with their current weight, strongest first, **including expired ones** (`"expired": true`). Used by the Streamlit UI to show how keywords are ageing.
+
+```json
+{ "keywords": [
+  { "value": "GNN", "weight": 0.871, "source": "session", "lastSeenAt": "2026-09-25T10:00:00+00:00", "expired": false },
+  { "value": "graphs", "weight": 0.06, "source": "session", "lastSeenAt": "2026-05-02T10:00:00+00:00", "expired": true }
+] }
+```
 
 ---
 

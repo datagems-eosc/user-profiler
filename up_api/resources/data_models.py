@@ -16,6 +16,10 @@ class Location(BaseModel):
 
 class Keyword(BaseModel):
     value: str
+    # Set on session keywords only: when first saved, and when last (re-)extracted.
+    # lastSeenAt drives the keyword's weight in the interest profile.
+    addedAt: Optional[datetime] = None
+    lastSeenAt: Optional[datetime] = None
 
 
 class Author(BaseModel):
@@ -85,6 +89,10 @@ class UserCreate(BaseModel):
     location: Optional[Location] = None
     orcid: Optional[ORCID] = None
     sessions: list[Session] = Field(default_factory=list)
+
+
+class KeywordsAppend(BaseModel):
+    keywords: list[str]
 
 
 class UserEdit(BaseModel):

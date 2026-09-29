@@ -5,7 +5,7 @@ import uuid
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 
-from .resources.data_models import UserCreate, UserEdit, UserProfile
+from .resources.data_models import KeywordsAppend, UserCreate, UserEdit, UserProfile
 from .resources.graph_helpers import (
     init_db,
     list_users,
@@ -15,7 +15,12 @@ from .resources.graph_helpers import (
 )
 from .resources.orcid_helpers import fetch_orcid_profile
 from .resources.LLM_helpers import generate_keywords_from_session
-from .resources.profile_helpers import build_interest_profile
+from .resources.profile_helpers import (
+    append_keywords,
+    build_interest_profile,
+    stamp_keywords,
+    weighted_keywords,
+)
 
 
 @asynccontextmanager
@@ -33,6 +38,14 @@ app = FastAPI(
     root_path=os.getenv("ROOT_PATH", ""),
     lifespan=lifespan,
 )
+
+
+def _save(profile: dict) -> UserProfile:
+    """Rewrite the user's whole subgraph from a (modified) profile dict."""
+    updated = UserProfile(**profile)
+    delete_user_subgraph(updated.userId)
+    build_user_subgraph(updated)
+    return updated
 
 
 def _require_user(user_id: str) -> dict:
@@ -68,10 +81,26 @@ def get_user_interest_profile(user_id: str):
     return build_interest_profile(_require_user(user_id))
 
 
+@app.get("/user/{user_id}/keywords", summary="List all keywords with their current weight, including expired ones")
+def get_user_keywords(user_id: str):
+    return {"keywords": weighted_keywords(_require_user(user_id))}
+
+
+@app.post("/user/{user_id}/keywords", summary="Append session keywords, refreshing the ones already present")
+def append_user_keywords(user_id: str, payload: KeywordsAppend):
+    current = _require_user(user_id)
+    current["keywords"], added = append_keywords(current["keywords"], payload.keywords)
+    _save(current)
+    refreshed = [k for k in payload.keywords if k.strip() and k.strip() not in added]
+    return {"added": added, "refreshed": refreshed}
+
+
 @app.post("/user", status_code=201, summary="Create a new user")
 def create_user(payload: UserCreate):
     user_id = str(uuid.uuid4())
-    profile = UserProfile(userId=user_id, **payload.model_dump())
+    data = payload.model_dump()
+    data["keywords"] = stamp_keywords(data["keywords"], [])
+    profile = UserProfile(userId=user_id, **data)
     build_user_subgraph(profile)
     return profile
 
@@ -100,11 +129,11 @@ def get_generated_keywords(user_id: str):
 @app.patch("/user/{user_id}", summary="Edit an existing user")
 def edit_user(user_id: str, payload: UserEdit):
     current = _require_user(user_id)
+    previous_keywords = current["keywords"]
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         current[field] = value
 
-    updated = UserProfile(**current)
-    delete_user_subgraph(user_id)
-    build_user_subgraph(updated)
-    return updated
+    # Keywords that already existed keep their timestamps, new (or never stamped) ones are stamped now
+    current["keywords"] = stamp_keywords(current["keywords"], previous_keywords)
+    return _save(current)
