@@ -441,10 +441,9 @@ def page_view():
             else:
                 try:
                     resp = _get(f"/user/{user_id}/generate-keywords", timeout=130)
-                    if "keywords" in resp:
-                        st.session_state._gen_kw_result = resp["keywords"]
-                    else:
-                        st.error(resp.get("error", "Generation failed."))
+                    st.session_state._gen_kw_result = resp["keywords"]
+                except requests.HTTPError as e:
+                    st.error(f"Could not generate keywords: {e.response.json().get('detail', e)}")
                 except Exception as e:
                     st.error(f"Could not generate keywords: {e}")
 
@@ -452,8 +451,11 @@ def page_view():
             if st.session_state.get("_gen_kw_all_extracted"):
                 st.info("All session keywords have already been extracted.")
             raw_kw = st.session_state.get("_gen_kw_result")
+            if raw_kw == []:
+                st.info("The LLM found no keywords in these sessions.")
             if raw_kw:
-                keywords = _parse_llm_keywords(raw_kw)
+                # Older API versions return the raw LLM text instead of a list
+                keywords = _parse_llm_keywords(raw_kw) if isinstance(raw_kw, str) else raw_kw
                 st.write("**Generated keywords:**")
                 for kw in keywords:
                     st.write(f"- {kw}")

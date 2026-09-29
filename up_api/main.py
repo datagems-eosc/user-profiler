@@ -93,7 +93,7 @@ def get_generated_keywords(user_id: str):
     profile = _require_user(user_id)
     result = generate_keywords_from_session(profile)
     if result is None:
-        return {"error": "LLM API call failed — check LLM_TOKEN and LLM_API_URL env vars"}
+        raise HTTPException(status_code=502, detail="The LLM could not be reached or returned an invalid response")
     return {"keywords": result}
 
 

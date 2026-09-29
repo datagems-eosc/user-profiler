@@ -273,17 +273,17 @@ Returns the raw ORCID JSON. Used internally by the Streamlit UI to auto-populate
 
 ### `GET /user/{user_id}/generate-keywords` — Generate keywords from sessions
 
-Calls the configured LLM with all queries from sessions not yet marked `extracted: true`. Returns the raw LLM response.
+Calls the configured LLM with all queries from sessions not yet marked `extracted: true`. The LLM is asked for structured JSON (`{"keywords": [...]}`), which is validated, trimmed and de-duplicated before being returned.
 
 ```bash
 curl http://localhost:8000/user/3f2e1d4c-.../generate-keywords
 ```
 
 ```json
-{ "keywords": "['knowledge graphs', 'graph embedding', 'GNN']" }
+{ "keywords": ["knowledge graphs", "graph embedding", "GNN"] }
 ```
 
-Returns `{"all_extracted": true}` if every session has already been extracted. Returns an error string if the LLM is unreachable or misconfigured.
+Returns `{"keywords": []}` without calling the LLM if every session has already been extracted. Returns HTTP 502 if the LLM is unreachable, misconfigured, or replies with invalid output.
 
 The Streamlit UI parses this response, displays the keywords, and lets the user accept them — which saves them to `user.keywords` and marks the contributing sessions as `extracted: true`.
 
