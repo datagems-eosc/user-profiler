@@ -222,3 +222,6 @@ __marimo__/
 
 # MacOS preferecnes
 .DS_Store
+
+# Local secrets
+SYSTEM TOKEN FOR USER PROFILER.txt
