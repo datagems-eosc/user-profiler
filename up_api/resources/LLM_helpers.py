@@ -1,5 +1,6 @@
 import json, requests, os
 from urllib.parse import urlsplit
+import urllib3
 
 TOKEN = os.getenv('LLM_TOKEN', '')
 LLM_API_URL = os.getenv('LLM_API_URL', '')
@@ -8,6 +9,25 @@ HEADERS = {
 "Authorization": "Bearer " + TOKEN,
 "Content-Type": "application/json"
 }
+
+
+def _ssl_verify_setting() -> bool | str:
+    """
+    Reads LLM_SSL_VERIFY: "true" (default) verifies against the system CAs,
+    a file path verifies against that CA bundle / certificate, and "false"
+    disables verification (e.g. for an endpoint with a self-signed certificate).
+    """
+    value = os.getenv('LLM_SSL_VERIFY', 'true').strip()
+    if value.lower() in ('false', '0', 'no'):
+        # Explicit opt-out: warn once here instead of on every request
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        print("WARNING: TLS certificate verification for the LLM API is disabled (LLM_SSL_VERIFY=false)")
+        return False
+    if value.lower() in ('true', '1', 'yes', ''):
+        return True
+    return value
+
+SSL_VERIFY = _ssl_verify_setting()
 
 
 def get_user_previous_queries(profile: dict) -> str:
@@ -55,7 +75,7 @@ def generate_keywords_from_session(context: dict, model_choice: str = "kimi-k2.6
     json_data = json.dumps(payload).encode('utf8')
     
     try:
-        response = requests.post(url=LLM_API_URL, headers=HEADERS, data=json_data, verify=False, timeout=120)
+        response = requests.post(url=LLM_API_URL, headers=HEADERS, data=json_data, verify=SSL_VERIFY, timeout=120)
         response.raise_for_status()
         res = response.json()['choices'][0]['message']['content']
         return res    
@@ -86,7 +106,7 @@ def get_available_models(model_choice) -> str:
         response = requests.get(
         url,
         headers= HEADERS,
-        verify=False,
+        verify=SSL_VERIFY,
         timeout=30,
         )
         response.raise_for_status()
