@@ -3,7 +3,7 @@ Bearer-token authentication against the DataGEMS Keycloak realm.
 
 Adapted from data-model-management's dmm_api/resources/security.py: tokens are
 verified with the realm's public keys (JWKS), then the audience is checked
-against this API's client ID.
+against OIDC_ALLOWED_AUDIENCES.
 """
 import logging
 import os
@@ -19,6 +19,15 @@ from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 logger = logging.getLogger(__name__)
 
 OIDC_CLIENT_ID: str = os.getenv("OIDC_CLIENT_ID", "user-profiler")
+# A token is accepted if its audience contains any of these (comma-separated).
+# query-recommender is included because the Keycloak `datagems` scope does not add
+# user-profiler to the audience (yet), and the Query Recommender forwards its caller's
+# token to this API: drop it once Keycloak adds user-profiler.
+OIDC_ALLOWED_AUDIENCES: list[str] = [
+    a.strip()
+    for a in os.getenv("OIDC_ALLOWED_AUDIENCES", f"{OIDC_CLIENT_ID},query-recommender").split(",")
+    if a.strip()
+]
 OIDC_ISSUER_URL: str = os.getenv(
     "OIDC_ISSUER_URL", "https://datagems-dev.scayle.es/oauth/realms/dev"
 )
@@ -103,15 +112,16 @@ async def require_valid_token(
 async def require_app_scope(
     token_payload: dict[str, Any] = Depends(require_valid_token),
 ) -> dict[str, Any]:
-    """FastAPI dependency: on top of require_valid_token, checks that OIDC_CLIENT_ID
-    is in the token's audience (`aud` can be a string or a list). Raises 403 otherwise."""
+    """FastAPI dependency: on top of require_valid_token, checks that one of
+    OIDC_ALLOWED_AUDIENCES is in the token's audience (`aud` can be a string or a list).
+    Raises 403 otherwise."""
     aud = token_payload.get("aud", [])
     audiences = aud if isinstance(aud, list) else [aud] if aud else []
 
-    if OIDC_CLIENT_ID not in audiences:
+    if not set(OIDC_ALLOWED_AUDIENCES) & set(audiences):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Token missing required audience: {OIDC_CLIENT_ID}",
+            detail=f"Token missing required audience: one of {', '.join(OIDC_ALLOWED_AUDIENCES)}",
         )
 
     return token_payload
