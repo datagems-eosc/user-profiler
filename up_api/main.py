@@ -21,6 +21,12 @@ from .resources.profile_helpers import (
     stamp_keywords,
     weighted_keywords,
 )
+import httpx
+import json
+
+
+# Data managment model url
+DMM_URL = 'https://datagems-dev.scayle.es'
 
 
 @asynccontextmanager
@@ -117,6 +123,45 @@ async def get_orcid_profile(orcid_id: str):
     return await fetch_orcid_profile(orcid_id)
 
 
+# =================================
+# Retriving user's query history
+
+# extract user's queries from a json payload
+async def extract_queries():
+    pass
+
+# exectute the http request to DMM
+async def fetch_user_queries(token: str, user_id: str) -> list[dict]:
+    '''
+    Automatic call and retrival of user queries history
+    '''
+    
+    # flag to bypass the token (for dev -> using fake data)
+    if os.getenv("MOCK_DMM") == "1":
+        data = json.load(open("mock_aplog.json"))
+        return extract_queries(data["aplogs"])
+    
+    # Actual request
+    else:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{DMM_URL}/api/v1/aplog/search",
+                params={"userId": [user_id], "limit": 50},
+                headers={"Authorization": f"Bearer {token}"},
+            )   
+            r.raise_for_status()
+            
+    # data returnd is extract by the function extract_queries        
+    return extract_queries(r.json()["aplogs"])
+
+'''
+# testing thre request
+@router.get("/user/queries_test")
+async def get_user_queries(token=Depends(...), payload=Depends(...)):
+    return await fetch_user_queries(token, payload["sub"])
+'''
+
+# TODO: add fetch_usqer_queries call (+ add token handling)
 @app.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
 def get_generated_keywords(user_id: str):
     profile = _require_user(user_id)
