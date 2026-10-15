@@ -25,9 +25,15 @@ from .resources.profile_helpers import (
 import httpx
 import json
 
+from typing import Any
+from fastapi.security import OAuth2PasswordBearer
+
+# for auth
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
 
 # Data managment model url
-DMM_URL = 'https://datagems-dev.scayle.es'
+DMM_URL = 'https://datagems-dev.scayle.es/dmm'
 
 
 @asynccontextmanager
@@ -131,39 +137,70 @@ async def get_orcid_profile(orcid_id: str):
 # Retriving user's query history
 
 # extract user's queries from a json payload
-async def extract_queries():
-    pass
+def extract_queries(aplogs: list[dict]) -> list[dict]:
+    '''
+    Extract the user's natural-language queries from DMM aplog/search results.
+    '''
+    queries = []
+    for log in aplogs:
+        nodes = log["ap"]["nodes"]
+        ap = next((n for n in nodes if "Analytical_Pattern" in n["labels"]), {})
+        for n in nodes:
+            props = n.get("properties", {})
+            # SQL operators also carry a "query" property
+            if "Operator" in n["labels"] and "SQL_Operator" not in n["labels"] and props.get("query"):
+                queries.append({
+                    "query": props["query"],
+                    "timestamp": props.get("startTime") or ap.get("properties", {}).get("startTime"),
+                    "ap_id": ap.get("id"),
+                })
+    return queries
 
 # exectute the http request to DMM
 async def fetch_user_queries(token: str, user_id: str) -> list[dict]:
     '''
-    Automatic call and retrival of user queries history
+    Input:
+        - token (str) security token (auth)
+        - user_id (str): id of the user of which the queries will be retrived
     '''
-    
-    # flag to bypass the token (for dev -> using fake data)
+    # flag fpr dev (to use local stored data)
     if os.getenv("MOCK_DMM") == "1":
-        data = json.load(open("mock_aplog.json"))
-        return extract_queries(data["aplogs"])
-    
-    # Actual request
-    else:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(
-                f"{DMM_URL}/api/v1/aplog/search",
-                params={"userId": [user_id], "limit": 50},
-                headers={"Authorization": f"Bearer {token}"},
-            )   
-            r.raise_for_status()
-            
-    # data returnd is extract by the function extract_queries        
+        with open("mock_aplog.json") as f:
+            return extract_queries(json.load(f)["aplogs"])
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{DMM_URL}/api/v1/aplog/search",
+            params={
+                "userId": user_id,
+                "operator": ["NLQ_Operator", "CDD_Operator"],
+                "limit": 50,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        
+    # 404 -> no logs available
+    if r.status_code == 404:   
+        return []
+    r.raise_for_status()
     return extract_queries(r.json()["aplogs"])
 
-'''
-# testing thre request
-@router.get("/user/queries_test")
-async def get_user_queries(token=Depends(...), payload=Depends(...)):
-    return await fetch_user_queries(token, payload["sub"])
-'''
+
+# for testing the DMM connection
+@protected.get("/user/{user_id}/queries_test", summary="Dev: queries of a user, extracted from DMM")
+async def get_user_queries(user_id: str, token: str = Depends(oauth2_scheme)):
+    '''
+    Returns user's queries
+    Input:
+        - user_id (str): id of the user of which the queries will be retrived
+        - token: security check (auth)
+    '''
+    queries = await fetch_user_queries(token, user_id)
+    return {"user_id": user_id, "count": len(queries), "queries": queries}
+
+
+# =================================
+# Generating user's kewywords
 
 # TODO: add fetch_usqer_queries call (+ add token handling)
 @protected.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
