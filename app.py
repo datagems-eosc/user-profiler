@@ -1,3 +1,7 @@
+import base64
+import json
+import os
+import time
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -24,7 +28,35 @@ with st.sidebar:
     )
     st.caption(_API_OPTIONS[_api_choice])
 
+    _token = st.text_input(
+        "Keycloak token",
+        value=os.getenv("DATAGEMS_TOKEN", ""),
+        type="password",
+        help="Sent as `Authorization: Bearer <token>`; it needs `user-profiler` or `query-recommender` "
+             "in its audience. "
+             "Get one from the 'Keycloak token' tab of DataGEMS_LLM_credentials_info.",
+    ).strip().removeprefix("Bearer ").strip()
+
 API_BASE = _API_OPTIONS[_api_choice]
+HEADERS = {"Authorization": f"Bearer {_token}"} if _token else {}
+
+
+def _token_problem(token: str) -> str | None:
+    """Missing / malformed / expired token (claims decoded for display only, the API verifies it)."""
+    if not token:
+        return "No token: the API will answer 401."
+    try:
+        payload = token.split(".")[1]
+        exp = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"]
+    except (IndexError, ValueError, KeyError, TypeError):
+        return "This doesn't look like a Keycloak token."
+    left = int(exp - time.time())
+    return f"Token expired {-left // 60} min ago: get a new one." if left <= 0 else None
+
+
+with st.sidebar:
+    if _problem := _token_problem(_token):
+        st.warning(_problem)
 
 
 # ---------------------------------------------------------------------------
@@ -32,25 +64,25 @@ API_BASE = _API_OPTIONS[_api_choice]
 # ---------------------------------------------------------------------------
 
 def _get(path: str, timeout: int = 5):
-    r = requests.get(f"{API_BASE}{path}", timeout=timeout)
+    r = requests.get(f"{API_BASE}{path}", headers=HEADERS, timeout=timeout)
     r.raise_for_status()
     return r.json()
 
 
 def _post(path: str, payload: dict):
-    r = requests.post(f"{API_BASE}{path}", json=payload, timeout=5)
+    r = requests.post(f"{API_BASE}{path}", json=payload, headers=HEADERS, timeout=5)
     r.raise_for_status()
     return r.json()
 
 
 def _patch(path: str, payload: dict):
-    r = requests.patch(f"{API_BASE}{path}", json=payload, timeout=5)
+    r = requests.patch(f"{API_BASE}{path}", json=payload, headers=HEADERS, timeout=5)
     r.raise_for_status()
     return r.json()
 
 
 def _delete(path: str):
-    r = requests.delete(f"{API_BASE}{path}", timeout=5)
+    r = requests.delete(f"{API_BASE}{path}", headers=HEADERS, timeout=5)
     r.raise_for_status()
     return r.json()
 
@@ -79,7 +111,8 @@ if "selected_user_id" not in st.session_state:
 # ---------------------------------------------------------------------------
 
 try:
-    requests.get(f"{API_BASE}/users", timeout=2)
+    # /api/v1 needs no token, so this only tests that the server is up
+    requests.get(f"{API_BASE}/api/v1", timeout=2)
 except (ConnectionError, Timeout):
     st.error(
         "Cannot connect to the User Profiler API.  "
