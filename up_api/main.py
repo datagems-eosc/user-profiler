@@ -155,7 +155,7 @@ def extract_queries(aplogs: list[dict]) -> dict[str, str]:
     return queries
 
 # exectute the http request to DMM
-async def fetch_user_queries(token: str, user_id: str) -> dir[str, str]:
+async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
     '''
     Input:
         - token (str) security token (auth)
@@ -206,10 +206,10 @@ def get_generated_keywords(user_id: str, token: str = Depends(oauth2_scheme)):
     profile = _require_user(user_id)
     
     # getting user previous queries
-    user_queries = fetch_user_queries(token, user_id)
+    user_queries = await fetch_user_queries(token, user_id)
     
     # generating the keywords
-    result = generate_keywords_from_session(profile, user_queries)
+    result = generate_keywords_from_session(profile, queries=user_queries)
     
     if result is None:
         raise HTTPException(status_code=502, detail="The LLM could not be reached or returned an invalid response")
