@@ -71,13 +71,20 @@ def get_user_previous_queries(profile: dict) -> str:
 
 
 # hard coded the one of the installed LLM
-def generate_keywords_from_session(context: dict, model_choice: str = "kimi-k2.6") -> list[str] | None:
+def generate_keywords_from_session(context: dict, model_choice: str = "kimi-k2.6",
+                                   queries: dict[str, str] | None = None) -> list[str] | None:
     """
     Returns the keywords extracted from the not-yet-extracted sessions, [] if there
     are no such queries, or None if the LLM could not be reached or replied with
     invalid output.
     """
-    queries_from_session = get_user_previous_queries(context)
+    
+    # using the user queries
+    if queries is not None:
+        queries_from_session = " | ".join(queries.values())
+    else:
+        queries_from_session = get_user_previous_queries(context)
+    
     if not queries_from_session:
         return []
 

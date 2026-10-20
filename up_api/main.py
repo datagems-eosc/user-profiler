@@ -137,11 +137,12 @@ async def get_orcid_profile(orcid_id: str):
 # Retriving user's query history
 
 # extract user's queries from a json payload
-def extract_queries(aplogs: list[dict]) -> list[dict]:
+def extract_queries(aplogs: list[dict]) -> dict[str, str]:
     '''
     Extract the user's natural-language queries from DMM aplog/search results.
+    Returns {timestamp: query}.
     '''
-    queries = []
+    queries = {}
     for log in aplogs:
         nodes = log["ap"]["nodes"]
         ap = next((n for n in nodes if "Analytical_Pattern" in n["labels"]), {})
@@ -149,15 +150,12 @@ def extract_queries(aplogs: list[dict]) -> list[dict]:
             props = n.get("properties", {})
             # SQL operators also carry a "query" property
             if "Operator" in n["labels"] and "SQL_Operator" not in n["labels"] and props.get("query"):
-                queries.append({
-                    "query": props["query"],
-                    "timestamp": props.get("startTime") or ap.get("properties", {}).get("startTime"),
-                    "ap_id": ap.get("id"),
-                })
+                timestamp = props.get("startTime") or ap.get("properties", {}).get("startTime")
+                queries[timestamp] = props["query"]
     return queries
 
 # exectute the http request to DMM
-async def fetch_user_queries(token: str, user_id: str) -> list[dict]:
+async def fetch_user_queries(token: str, user_id: str) -> dir[str, str]:
     '''
     Input:
         - token (str) security token (auth)
@@ -181,7 +179,7 @@ async def fetch_user_queries(token: str, user_id: str) -> list[dict]:
         
     # 404 -> no logs available
     if r.status_code == 404:   
-        return []
+        return {}
     r.raise_for_status()
     return extract_queries(r.json()["aplogs"])
 
@@ -204,9 +202,15 @@ async def get_user_queries(user_id: str, token: str = Depends(oauth2_scheme)):
 
 # TODO: add fetch_usqer_queries call (+ add token handling)
 @protected.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
-def get_generated_keywords(user_id: str):
+def get_generated_keywords(user_id: str, token: str = Depends(oauth2_scheme)):
     profile = _require_user(user_id)
-    result = generate_keywords_from_session(profile)
+    
+    # getting user previous queries
+    user_queries = fetch_user_queries(token, user_id)
+    
+    # generating the keywords
+    result = generate_keywords_from_session(profile, user_queries)
+    
     if result is None:
         raise HTTPException(status_code=502, detail="The LLM could not be reached or returned an invalid response")
     return {"keywords": result}
