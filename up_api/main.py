@@ -120,6 +120,30 @@ def create_user(payload: UserCreate):
     build_user_subgraph(profile)
     return profile
 
+#============================================
+# Create user test with DMM id
+
+@protected.post("/user/{user_id}", status_code=201, summary="Create a user with a given ID (e.g. the DMM one)")
+def create_user_with_id(user_id: str, payload: UserCreate):
+    
+    # TODO: to swith to /user/me --> For opening an enpoint for the gateway/UI
+    
+    # The ID must be a canonical UUID: it ends up in the graph and must match the one the DMM logs queries under
+    try:
+        if str(uuid.UUID(user_id)) != user_id:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=422, detail="user_id must be a lowercase, hyphenated UUID")
+    if load_user_profile(user_id) is not None:
+        raise HTTPException(status_code=409, detail=f"User '{user_id}' already exists")
+
+    data = payload.model_dump()
+    data["keywords"] = stamp_keywords(data["keywords"], [])
+    profile = UserProfile(userId=user_id, **data)
+    build_user_subgraph(profile)
+    return profile
+
+
 
 @protected.delete("/user/{user_id}", status_code=200, summary="Delete a user")
 def delete_user(user_id: str):
