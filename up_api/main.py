@@ -22,6 +22,18 @@ from .resources.profile_helpers import (
     stamp_keywords,
     weighted_keywords,
 )
+import httpx
+import json
+
+from typing import Any
+from fastapi.security import OAuth2PasswordBearer
+
+# for auth
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+
+# Data managment model url
+DMM_URL = 'https://datagems-dev.scayle.es/dmm'
 
 
 @asynccontextmanager
@@ -108,6 +120,30 @@ def create_user(payload: UserCreate):
     build_user_subgraph(profile)
     return profile
 
+#============================================
+# Create user test with DMM id
+
+@protected.post("/user/{user_id}", status_code=201, summary="Create a user with a given ID (e.g. the DMM one)")
+def create_user_with_id(user_id: str, payload: UserCreate):
+    
+    # TODO: to swith to /user/me --> For opening an enpoint for the gateway/UI
+    
+    # The ID must be a canonical UUID: it ends up in the graph and must match the one the DMM logs queries under
+    try:
+        if str(uuid.UUID(user_id)) != user_id:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=422, detail="user_id must be a lowercase, hyphenated UUID")
+    if load_user_profile(user_id) is not None:
+        raise HTTPException(status_code=409, detail=f"User '{user_id}' already exists")
+
+    data = payload.model_dump()
+    data["keywords"] = stamp_keywords(data["keywords"], [])
+    profile = UserProfile(userId=user_id, **data)
+    build_user_subgraph(profile)
+    return profile
+
+
 
 @protected.delete("/user/{user_id}", status_code=200, summary="Delete a user")
 def delete_user(user_id: str):
@@ -121,10 +157,84 @@ async def get_orcid_profile(orcid_id: str):
     return await fetch_orcid_profile(orcid_id)
 
 
+# =================================
+# Retriving user's query history
+
+# extract user's queries from a json payload
+def extract_queries(aplogs: list[dict]) -> dict[str, str]:
+    '''
+    Extract the user's natural-language queries from DMM aplog/search results.
+    Returns {timestamp: query}.
+    '''
+    queries = {}
+    for log in aplogs:
+        nodes = log["ap"]["nodes"]
+        ap = next((n for n in nodes if "Analytical_Pattern" in n["labels"]), {})
+        for n in nodes:
+            props = n.get("properties", {})
+            # SQL operators also carry a "query" property
+            if "Operator" in n["labels"] and "SQL_Operator" not in n["labels"] and props.get("query"):
+                timestamp = props.get("startTime") or ap.get("properties", {}).get("startTime")
+                queries[timestamp] = props["query"]
+    return queries
+
+# exectute the http request to DMM
+async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
+    '''
+    Input:
+        - token (str) security token (auth)
+        - user_id (str): id of the user of which the queries will be retrived
+    '''
+    # flag fpr dev (to use local stored data)
+    if os.getenv("MOCK_DMM") == "1":
+        with open("mock_aplog.json") as f:
+            return extract_queries(json.load(f)["aplogs"])
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.get(
+            f"{DMM_URL}/api/v1/aplog/search",
+            params={
+                "userId": user_id,
+                "operator": ["NLQ_Operator", "CDD_Operator"],
+                "limit": 50,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        
+    # 404 -> no logs available
+    if r.status_code == 404:   
+        return {}
+    r.raise_for_status()
+    return extract_queries(r.json()["aplogs"])
+
+
+# for testing the DMM connection
+@protected.get("/user/{user_id}/queries_test", summary="Dev: queries of a user, extracted from DMM")
+async def get_user_queries(user_id: str, token: str = Depends(oauth2_scheme)):
+    '''
+    Returns user's queries
+    Input:
+        - user_id (str): id of the user of which the queries will be retrived
+        - token: security check (auth)
+    '''
+    queries = await fetch_user_queries(token, user_id)
+    return {"user_id": user_id, "count": len(queries), "queries": queries}
+
+
+# =================================
+# Generating user's kewywords
+
+# TODO: add fetch_usqer_queries call (+ add token handling)
 @protected.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
-def get_generated_keywords(user_id: str):
+async def get_generated_keywords(user_id: str, token: str = Depends(oauth2_scheme)):
     profile = _require_user(user_id)
-    result = generate_keywords_from_session(profile)
+    
+    # getting user previous queries
+    user_queries = await fetch_user_queries(token, user_id)
+    
+    # generating the keywords
+    result = generate_keywords_from_session(profile, queries=user_queries)
+    
     if result is None:
         raise HTTPException(status_code=502, detail="The LLM could not be reached or returned an invalid response")
     return {"keywords": result}

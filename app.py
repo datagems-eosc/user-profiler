@@ -14,6 +14,8 @@ INACTIVITY_MINUTES = 5
 _API_OPTIONS = {
     "Local": "http://localhost:8000",
     "DataGEMS (dev)": "https://datagems-dev.scayle.es/up",
+    # Option to use DMM data
+    "Local + DMM": "http://localhost:8000",
 }
 
 st.set_page_config(page_title="User Profiler", layout="wide")
@@ -38,6 +40,8 @@ with st.sidebar:
     ).strip().removeprefix("Bearer ").strip()
 
 API_BASE = _API_OPTIONS[_api_choice]
+# flag for DMM option
+DMM_MODE = _api_choice == "Local + DMM"
 HEADERS = {"Authorization": f"Bearer {_token}"} if _token else {}
 
 
@@ -307,6 +311,39 @@ def _weighted_keywords(user_id: str) -> list[dict] | None:
         return None
 
 
+
+# ---------------------------------------------------------------------------
+# DMM id user
+# ---------------------------------------------------------------------------
+
+
+# DMM users shown in the dropdown: "Name Surname" -> user ID in the DMM
+_DMM_USERS = {
+    "Luca Agostini": "38894023-1b01-4646-a2f8-7fbab0f05d99",
+    "Collaborator": "<id_collaboratore>",
+}
+
+
+def _add_dmm_user():
+    with st.expander("Add a DMM user to the local graph"):
+        who = st.selectbox("DMM user", [*_DMM_USERS, "Other…"])
+        uid = st.text_input("User ID").strip() if who == "Other…" else _DMM_USERS[who]
+        label = f"DMM {uid[:8]}" if who == "Other…" else who
+        name, _, surname = label.partition(" ")
+        st.caption(f"{label}  ·  {uid}")
+        if uid and st.button("Add user"):
+            payload = {"name": name, "surname": surname or "-",
+                       "email": "dmm@example.org", "affiliation": "DMM"}
+            try:
+                _post(f"/user/{uid}", payload)
+                st.rerun()
+            except requests.HTTPError as e:
+                st.error(e.response.json().get("detail", e))
+            except Exception as e:
+                st.error(f"Could not add user: {e}")
+
+
+
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
@@ -319,6 +356,9 @@ def page_list():
         if st.button("+ Create user", use_container_width=True):
             _nav("create")
             st.rerun()
+
+    if DMM_MODE:
+        _add_dmm_user()
 
     try:
         data = _get("/users")
@@ -480,9 +520,16 @@ def page_view():
     all_queries = [
         q for s in user.get("sessions", []) for q in s.get("queries", [])
     ]
-    if all_queries:
+    if all_queries or DMM_MODE:
         st.divider()
         st.subheader("Generate keywords from sessions")
+        
+        if DMM_MODE:
+            with st.expander("Queries in DMM"):
+                try:
+                    st.json(_get(f"/user/{user_id}/queries_test", timeout=30))
+                except Exception as e:
+                    st.error(f"Could not load DMM queries: {e}")
 
         if st.button("Generate", key="btn_gen_kw"):
             st.session_state._gen_kw_user = user_id
@@ -492,7 +539,7 @@ def page_view():
                 s for s in user.get("sessions", [])
                 if not s.get("extracted") and s.get("queries")
             ]
-            if not unextracted:
+            if not unextracted and not DMM_MODE:
                 st.session_state._gen_kw_all_extracted = True
             else:
                 try:
