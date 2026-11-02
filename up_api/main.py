@@ -33,7 +33,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
 # Data managment model url
-DMM_URL = 'https://datagems-dev.scayle.es/dmm'
+DMM_URL = os.getenv("DMM_URL", "https://datagems-dev.scayle.es/dmm").rstrip("/")
 
 
 @asynccontextmanager
@@ -190,22 +190,30 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
         with open("mock_aplog.json") as f:
             return extract_queries(json.load(f)["aplogs"])
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(
-            f"{DMM_URL}/api/v1/aplog/search",
-            params={
-                "userId": user_id,
-                "operator": ["NLQ_Operator", "CDD_Operator"],
-                "limit": 50,
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"{DMM_URL}/api/v1/aplog/search",
+                params={
+                    "userId": user_id,
+                    "operator": ["NLQ_Operator", "CDD_Operator"],
+                    "limit": 50,
+                },
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"The DMM could not be reached: {exc}") from exc
+
     # 404 -> no logs available
-    if r.status_code == 404:   
+    if r.status_code == 404:
         return {}
-    r.raise_for_status()
-    return extract_queries(r.json()["aplogs"])
+    # Any other DMM error (e.g. 401/403 if it rejects the forwarded token) is reported as a 502 with its status
+    if r.is_error:
+        raise HTTPException(status_code=502, detail=f"The DMM returned {r.status_code}: {r.text[:200]}")
+    try:
+        return extract_queries(r.json()["aplogs"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="The DMM returned an unexpected response") from exc
 
 
 # for testing the DMM connection
