@@ -75,6 +75,7 @@ The LLM keyword generation endpoint requires two environment variables:
 | `LLM_API_URL` | Full URL of the LLM chat completions endpoint |
 | `LLM_SSL_VERIFY` | Optional. TLS certificate verification for the LLM API. `true` (default) uses the system CAs, a file path uses that CA bundle or certificate, `false` disables verification (e.g. for an endpoint with a self-signed certificate). |
 | `DMM_URL` | Optional. Base URL of the DMM, where keyword generation reads the user's query history (with the caller's token). Defaults to `https://datagems-dev.scayle.es/dmm`. If the DMM is unreachable or returns an error other than 404, keyword generation answers 502. |
+| `GRAFEO_DB_PATH` | Optional. Folder of the embedded Grafeo database holding all users. Defaults to `./grafeo_data`. In Kubernetes it must be on a persistent volume (the deployment uses `/data/grafeo_data` on `user-profiler-pvc`), otherwise every redeploy starts with no users. |
 
 Set them **before** starting the server (they are read once at startup):
 

@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from datetime import datetime
 
@@ -5,7 +6,8 @@ from grafeo import GrafeoDB
 
 from .data_models import UserProfile
 
-DB_PATH = "./grafeo_data"
+# In Kubernetes this must point at a persistent volume, or every redeploy starts from an empty graph
+DB_PATH = os.getenv("GRAFEO_DB_PATH", "./grafeo_data")
 
 db: GrafeoDB = None
 
@@ -13,6 +15,14 @@ db: GrafeoDB = None
 def init_db() -> None:
     global db
     db = GrafeoDB(DB_PATH)
+
+
+def close_db() -> None:
+    """Flush and close the database (called on shutdown, e.g. when Kubernetes stops the pod)."""
+    global db
+    if db is not None:
+        db.close()
+        db = None
 
 
 # ---------------------------------------------------------------------------

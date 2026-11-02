@@ -9,6 +9,7 @@ from .resources import security
 from .resources.data_models import KeywordsAppend, UserCreate, UserEdit, UserProfile
 from .resources.graph_helpers import (
     init_db,
+    close_db,
     list_users,
     build_user_subgraph,
     delete_user_subgraph,
@@ -40,6 +41,7 @@ DMM_URL = os.getenv("DMM_URL", "https://datagems-dev.scayle.es/dmm").rstrip("/")
 async def lifespan(_: FastAPI):
     init_db()
     yield
+    close_db()
 
 
 app = FastAPI(
