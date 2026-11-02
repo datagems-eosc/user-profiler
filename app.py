@@ -343,6 +343,44 @@ def _add_dmm_user():
                 st.error(f"Could not add user: {e}")
 
 
+def _render_dmm_queries(user_id: str) -> dict:
+    """Show the queries the DMM has under this user ID and return them ({timestamp: query}, empty on error).
+    Cached per endpoint and user, so the DMM is only asked again on Refresh."""
+    cache = st.session_state.setdefault("_dmm_queries_cache", {})
+    key = (API_BASE, user_id)
+
+    st.divider()
+    head, refresh = st.columns([5, 1])
+    head.subheader("Queries in DMM")
+    if refresh.button("Refresh", key=f"btn_dmm_refresh_{user_id}"):
+        cache.pop(key, None)
+
+    if key not in cache:
+        try:
+            with st.spinner("Asking the DMM..."):
+                cache[key] = {"queries": _get(f"/user/{user_id}/queries_test", timeout=30).get("queries", {})}
+        except requests.HTTPError as e:
+            # Not cached, so the next rerun tries again (e.g. after pasting a token with the DMM audience)
+            st.error(f"Could not load DMM queries ({e.response.status_code}): "
+                     f"{e.response.json().get('detail', e)}")
+            return {}
+        except Exception as e:
+            st.error(f"Could not load DMM queries: {e}")
+            return {}
+
+    queries = cache[key]["queries"]
+    if not queries:
+        st.info("The DMM has no queries under this user ID.")
+    else:
+        st.caption(f"{len(queries)} queries, newest first")
+        st.dataframe(
+            [{"timestamp": ts, "query": q} for ts, q in sorted(queries.items(), key=lambda kv: str(kv[0]), reverse=True)],
+            hide_index=True,
+            width="stretch",
+        )
+    return queries
+
+
 
 # ---------------------------------------------------------------------------
 # Pages
@@ -516,20 +554,16 @@ def page_view():
                         except Exception as e:
                             st.error(f"Could not update session: {e}")
 
+    # Queries the DMM has logged under this user's ID
+    dmm_queries = _render_dmm_queries(user_id)
+
     # Keyword generation from sessions
     all_queries = [
         q for s in user.get("sessions", []) for q in s.get("queries", [])
     ]
-    if all_queries or DMM_MODE:
+    if all_queries or DMM_MODE or dmm_queries:
         st.divider()
         st.subheader("Generate keywords from sessions")
-        
-        if DMM_MODE:
-            with st.expander("Queries in DMM"):
-                try:
-                    st.json(_get(f"/user/{user_id}/queries_test", timeout=30))
-                except Exception as e:
-                    st.error(f"Could not load DMM queries: {e}")
 
         if st.button("Generate", key="btn_gen_kw"):
             st.session_state._gen_kw_user = user_id
@@ -539,7 +573,8 @@ def page_view():
                 s for s in user.get("sessions", [])
                 if not s.get("extracted") and s.get("queries")
             ]
-            if not unextracted and not DMM_MODE:
+            # The API generates from the DMM queries when there are any, so only stop here without them
+            if not unextracted and not DMM_MODE and not dmm_queries:
                 st.session_state._gen_kw_all_extracted = True
             else:
                 try:
@@ -601,13 +636,30 @@ def page_create():
 
     st.title("Create user")
 
+    # Optional: reuse the ID the DMM logs this user's queries under, so keyword generation finds them
+    custom_id = st.text_input(
+        "User ID (optional)",
+        placeholder="Leave empty for a new random ID, or paste the user's DMM ID",
+        help="Find a DMM ID in the 'DMM queries' tab (most recent queries by any user).",
+    ).strip()
+
     payload = _render_user_form()
     if payload is not None:
+        if custom_id:
+            try:
+                if str(uuid.UUID(custom_id)) != custom_id:
+                    raise ValueError
+            except ValueError:
+                st.error("The user ID must be a lowercase, hyphenated UUID.")
+                return
         try:
-            result = _post("/user", payload)
+            result = _post(f"/user/{custom_id}" if custom_id else "/user", payload)
             st.success(f"User created with ID `{result['userId']}`")
             _nav("view", result["userId"])
             st.rerun()
+        except requests.HTTPError as e:
+            # e.g. 409 if a user with this ID already exists
+            st.error(f"Failed to create user: {e.response.json().get('detail', e)}")
         except Exception as e:
             st.error(f"Failed to create user: {e}")
 
