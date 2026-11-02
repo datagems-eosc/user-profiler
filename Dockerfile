@@ -12,13 +12,13 @@ COPY uv.lock /app/uv.lock
 COPY pyproject.toml /app/pyproject.toml
 COPY README.md /app/README.md
 
-# Install dependencies
-RUN uv sync --frozen --no-install-project
+# Install dependencies (--no-dev skips local-only tools like streamlit)
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Copy the up_api folder into the image
 COPY up_api /app/up_api
 
 # Sync the project
-RUN uv sync --frozen
+RUN uv sync --frozen --no-dev
 
-CMD ["uv", "run", "uvicorn", "up_api.main:app", "--host", "0.0.0.0", "--port", "5000"]
+CMD ["uv", "run", "--frozen", "--no-dev", "uvicorn", "up_api.main:app", "--host", "0.0.0.0", "--port", "5000"]
