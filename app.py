@@ -36,7 +36,7 @@ with st.sidebar:
         type="password",
         help="Sent as `Authorization: Bearer <token>`; it needs `user-profiler` or `query-recommender` "
              "in its audience. "
-             "Get one from the 'Keycloak token' tab of DataGEMS_LLM_credentials_info.",
+             "Get one from the DataGEMS AAI (Keycloak).",
     ).strip().removeprefix("Bearer ").strip()
 
 API_BASE = _API_OPTIONS[_api_choice]

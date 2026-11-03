@@ -89,15 +89,15 @@ $env:LLM_TOKEN = "your-token"
 $env:LLM_API_URL = "https://your-llm-host/v1/chat/completions"
 ```
 
-The internal LLM endpoint (`https://172.16.59.5:32443`) uses a self-signed certificate, so locally you also need `LLM_SSL_VERIFY`. Otherwise keyword generation fails with `CERTIFICATE_VERIFY_FAILED`. Either trust that certificate (recommended) or disable verification:
+If the LLM endpoint you reach locally uses a self-signed certificate, you also need `LLM_SSL_VERIFY`. Otherwise keyword generation fails with `CERTIFICATE_VERIFY_FAILED`. Either trust that certificate (recommended) or disable verification:
 
 ```bash
 # bash: save the endpoint's certificate once and verify against it
-openssl s_client -connect 172.16.59.5:32443 </dev/null 2>/dev/null | openssl x509 > scayle-llm.pem
-export LLM_SSL_VERIFY="$PWD/scayle-llm.pem"      # or: export LLM_SSL_VERIFY=false
+openssl s_client -connect <llm-host>:<port> </dev/null 2>/dev/null | openssl x509 > llm.pem
+export LLM_SSL_VERIFY="$PWD/llm.pem"      # or: export LLM_SSL_VERIFY=false
 
 # PowerShell
-$env:LLM_SSL_VERIFY = "C:\path\to\scayle-llm.pem"   # or: $env:LLM_SSL_VERIFY = "false"
+$env:LLM_SSL_VERIFY = "C:\path\to\llm.pem"   # or: $env:LLM_SSL_VERIFY = "false"
 ```
 
 If these are not set, all other endpoints still work; only `GET /user/{id}/generate-keywords` will return an error.
