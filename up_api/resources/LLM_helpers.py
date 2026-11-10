@@ -3,7 +3,7 @@ from urllib.parse import urlsplit
 import urllib3
 from pydantic import ValidationError
 
-from .data_models import LLMSessionKeywords
+from .data_models import LLMSessionKeywords, DMMQuery
 
 # Asks OpenAI-compatible backends to constrain the reply to this schema
 KEYWORDS_RESPONSE_FORMAT = {
@@ -72,7 +72,7 @@ def get_user_previous_queries(profile: dict) -> str:
 
 # hard coded the one of the installed LLM
 def generate_keywords_from_session(context: dict, model_choice: str = "kimi-k2.6",
-                                   queries: dict[str, str] | None = None) -> list[str] | None:
+                                   queries: list[DMMQuery] | None = None) -> list[str] | None:
     """
     Returns the keywords extracted from the not-yet-extracted sessions, [] if there
     are no such queries, or None if the LLM could not be reached or replied with
