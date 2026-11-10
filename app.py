@@ -296,7 +296,7 @@ def _render_keyword_tags(kws: list[dict]) -> None:
         label = k["value"] if weight is None else f'{k["value"]} · {weight:.2f}'
         opacity = 1.0 if weight is None else max(0.35, weight)
         strike = "text-decoration:line-through;" if k.get("expired") else ""
-        return (f'<span style="background:#e8f4f8; border:1px solid #aecfe0; border-radius:14px; '
+        return (f'<span style="background:#e8f4f8; color:#1a3a4a; border:1px solid #aecfe0; border-radius:14px; '
                 f'padding:3px 12px; margin:3px; display:inline-block; font-size:0.9rem; '
                 f'opacity:{opacity}; {strike}">{label}</span>')
 
@@ -343,7 +343,22 @@ def _add_dmm_user():
                 st.error(f"Could not add user: {e}")
 
 
-def _render_dmm_queries(user_id: str) -> list[dict]:
+def _saved_query_times(user: dict) -> set:
+    '''
+    typedAt of the queries already saved in grafeo, parsed so "...Z" and "...+00:00" compare equal
+    '''
+    times = set()
+    for s in user.get("sessions", []):
+        for q in s.get("queries", []):
+            try:
+                times.add(datetime.fromisoformat(str(q["typedAt"])))
+            except (KeyError, ValueError):
+                pass
+    return times
+
+
+
+def _render_dmm_queries(user_id: str, saved: set = frozenset()) -> list[dict]:
     '''
     Show the queries the DMM has under this user ID and return them ([{text, typedAt}], empty on error)
     '''
@@ -378,8 +393,10 @@ def _render_dmm_queries(user_id: str) -> list[dict]:
     else:
         st.caption(f"{len(queries)} queries, newest first")
         st.dataframe(
-            [{"timestamp": q["typedAt"], "query": q["text"]}
+            [{"saved": datetime.fromisoformat(q["typedAt"]) in saved,
+              "timestamp": q["typedAt"], "query": q["text"]}
              for q in sorted(queries, key=lambda q: q["typedAt"], reverse=True)],
+            column_config={"saved": st.column_config.CheckboxColumn("In grafeo")},
             hide_index=True,
             width="stretch",
         )
@@ -537,9 +554,6 @@ def page_view():
         loc = user["location"]
         st.write(f"{loc['city']}, {loc['country']}")
 
-    # to chekc the refresh status
-    _render_refresh_status(user_id)
-
     # Keywords
     kws = user.get("keywords", [])
     col_kw, col_kw_btn = st.columns([5, 1])
@@ -608,7 +622,10 @@ def page_view():
                             st.error(f"Could not update session: {e}")
 
     # Queries the DMM has logged under this user's ID
-    dmm_queries = _render_dmm_queries(user_id)
+    dmm_queries = _render_dmm_queries(user_id, _saved_query_times(user))
+
+    # to check the refresh status
+    _render_refresh_status(user_id)
 
     # Keyword generation from sessions
     all_queries = [
@@ -878,7 +895,9 @@ DMM_URL = os.getenv("DMM_URL", "https://datagems-dev.scayle.es/dmm").rstrip("/")
 
 
 def _recent_dmm_queries(n: int) -> list[dict]:
-    """The n most recent NLQ/CDD queries by any user, newest first, straight from the DMM."""
+    '''
+    The n most recent NLQ/CDD queries by any user, newest first, straight from the DMM
+    '''
     # The DMM doesn't sort by time, so fetch a large page and sort here
     r = requests.get(
         f"{DMM_URL}/api/v1/aplog/search",
