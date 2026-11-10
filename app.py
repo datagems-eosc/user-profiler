@@ -343,9 +343,10 @@ def _add_dmm_user():
                 st.error(f"Could not add user: {e}")
 
 
-def _render_dmm_queries(user_id: str) -> dict:
-    """Show the queries the DMM has under this user ID and return them ({timestamp: query}, empty on error).
-    Cached per endpoint and user, so the DMM is only asked again on Refresh."""
+def _render_dmm_queries(user_id: str) -> list[dict]:
+    '''
+    Show the queries the DMM has under this user ID and return them ([{text, typedAt}], empty on error)
+    '''
     cache = st.session_state.setdefault("_dmm_queries_cache", {})
     key = (API_BASE, user_id)
 
@@ -358,15 +359,15 @@ def _render_dmm_queries(user_id: str) -> dict:
     if key not in cache:
         try:
             with st.spinner("Asking the DMM..."):
-                cache[key] = {"queries": _get(f"/user/{user_id}/queries_test", timeout=30).get("queries", {})}
+                cache[key] = {"queries": _get(f"/user/{user_id}/queries_test", timeout=30).get("queries", [])}
         except requests.HTTPError as e:
             # Not cached, so the next rerun tries again (e.g. after pasting a token with the DMM audience)
             st.error(f"Could not load DMM queries ({e.response.status_code}): "
                      f"{e.response.json().get('detail', e)}")
-            return {}
+            return []
         except Exception as e:
             st.error(f"Could not load DMM queries: {e}")
-            return {}
+            return []
 
     queries = cache[key]["queries"]
     if not queries:
@@ -374,12 +375,55 @@ def _render_dmm_queries(user_id: str) -> dict:
     else:
         st.caption(f"{len(queries)} queries, newest first")
         st.dataframe(
-            [{"timestamp": ts, "query": q} for ts, q in sorted(queries.items(), key=lambda kv: str(kv[0]), reverse=True)],
+            [{"timestamp": q["typedAt"], "query": q["text"]}
+             for q in sorted(queries, key=lambda q: q["typedAt"], reverse=True)],
             hide_index=True,
             width="stretch",
         )
     return queries
 
+
+
+# For testing the automatic refresh of keywords (using DMM queries)
+_KW_ICONS = {"ok": "🟢", "error": "🔴", "skipped": "⚪"}
+
+
+def _refresh_keywords(user_id: str) -> None:
+    '''
+    Turns the user's new DMM queries into keywords
+        --> the outcome is shown by page_view
+    '''
+    state = {"user_id": user_id, "result": None, "error": None}
+    try:
+        with st.spinner("Refreshing keywords from new DMM queries..."):
+            r = requests.post(f"{API_BASE}/user/{user_id}/refresh-keyword_test", headers=HEADERS, timeout=300)
+        r.raise_for_status()
+        state["result"] = r.json()
+    except requests.HTTPError as e:
+        state["error"] = f"{e.response.status_code}: {e.response.text[:200]}"
+    except Exception as e:
+        state["error"] = str(e)
+    st.session_state._kw_refresh = state
+
+
+def _render_refresh_status(user_id: str) -> None:
+    '''
+    renders the status of the refresh
+    '''
+    state = st.session_state.get("_kw_refresh")
+    if not state or state["user_id"] != user_id:
+        return
+    if state["error"]:
+        st.error(f"Keyword refresh failed: {state['error']}")
+        return
+    s = state["result"]
+    dmm, llm = st.columns(2)
+    dmm.write(f"{_KW_ICONS[s['dmm']]} DMM: {s['dmm']}")
+    llm.write(f"{_KW_ICONS[s['llm']]} LLM: {s['llm']}")
+    if s["detail"]:
+        st.warning(s["detail"])
+    if s["added"] or s["refreshed"]:
+        st.caption(f"New: {', '.join(s['added']) or '—'}  |  Refreshed: {', '.join(s['refreshed']) or '—'}")
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +473,9 @@ def page_list():
         row[1].write(u["surname"])
         row[2].code(uid)
         if row[3].button("View", key=f"view_{uid}"):
+            # if we are in DMM mode, activate the automatic refresh
+            if DMM_MODE:
+                _refresh_keywords(uid)
             _nav("view", uid)
             st.rerun()
         if row[4].button("Edit", key=f"edit_{uid}"):
@@ -486,6 +533,9 @@ def page_view():
         st.subheader("Location")
         loc = user["location"]
         st.write(f"{loc['city']}, {loc['country']}")
+
+    # to chekc the refresh status
+    _render_refresh_status(user_id)
 
     # Keywords
     kws = user.get("keywords", [])
@@ -917,13 +967,13 @@ def _dmm_user_queries():
         st.error(f"Could not load queries: {e}")
         return
 
-    queries = data.get("queries", {})
+    queries = data.get("queries", [])
     if not queries:
         st.info("The DMM has no queries for this user ID.")
         return
     st.markdown(f"**{data['count']} queries**")
     st.dataframe(
-        [{"timestamp": ts, "query": q} for ts, q in sorted(queries.items(), key=lambda kv: str(kv[0]), reverse=True)],
+        [{"timestamp": q["typedAt"], "query": q["text"]} for q in reversed(queries)],
         hide_index=True,
         width="stretch",
     )

@@ -22,6 +22,7 @@ from .resources.graph_helpers import (
 from .resources.orcid_helpers import fetch_orcid_profile
 from .resources.LLM_helpers import generate_keywords_from_session
 from .resources.profile_helpers import (
+    MAX_STORED_QUERIES,
     append_keywords,
     build_interest_profile,
     last_processed_at,
@@ -179,12 +180,15 @@ async def get_orcid_profile(orcid_id: str):
 # Retriving user's query history
 
 # extract user's queries from a json payload
-def extract_queries(aplogs: list[dict]) -> dict[str, str]:
+def extract_queries(aplogs: list[dict]) -> list[DMMQuery]:
     '''
-    Extract the user's natural-language queries from DMM aplog/search results.
-    Returns {timestamp: query}.
+    extract the user's natural-language queries from DMM aplog/search results
+    
+    Returns
+        - a list of DMMQuery (text + typedAt in UTC)
+            --> queries without a timestamp are skipped
     '''
-    queries = {}
+    queries = []
     for log in aplogs:
         nodes = log["ap"]["nodes"]
         ap = next((n for n in nodes if "Analytical_Pattern" in n["labels"]), {})
@@ -193,7 +197,8 @@ def extract_queries(aplogs: list[dict]) -> dict[str, str]:
             # SQL operators also carry a "query" property
             if "Operator" in n["labels"] and "SQL_Operator" not in n["labels"] and props.get("query"):
                 timestamp = props.get("startTime") or ap.get("properties", {}).get("startTime")
-                queries[timestamp] = props["query"]
+                if timestamp:
+                    queries.append(DMMQuery(text=props["query"], typedAt=timestamp))
     return queries
 
 # exectute the http request to DMM
@@ -212,10 +217,10 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.get(
                 f"{DMM_URL}/api/v1/aplog/search",
-                params={
+                pparams={
                     "userId": user_id,
                     "operator": ["NLQ_Operator", "CDD_Operator"],
-                    "limit": 50,
+                    "limit": MAX_STORED_QUERIES,
                 },
                 headers={"Authorization": f"Bearer {token}"},
             )
@@ -224,7 +229,7 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
 
     # 404 -> no logs available
     if r.status_code == 404:
-        return {}
+        return []
     # Any other DMM error (e.g. 401/403 if it rejects the forwarded token) is reported as a 502 with its status
     if r.is_error:
         raise HTTPException(status_code=502, detail=f"The DMM returned {r.status_code}: {r.text[:200]}")
@@ -350,7 +355,7 @@ def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks, toke
 # ==============================
 # TEST automatic refresh
 
-@protected.post("/user/{user_id}/refresh-keywords_test", summary="Dev: refresh user's keywords from the DMM (for testing)")
+@protected.post("/user/{user_id}/refresh-keyword_test", summary="Dev: refresh user's keywords from the DMM (for testing)")
 async def refresh_keywords(user_id: str, token: str = Depends(oauth2_scheme)):
     '''
     refreshes user's keywords 
