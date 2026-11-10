@@ -446,6 +446,19 @@ def _render_refresh_status(user_id: str) -> None:
         st.caption(f"New: {', '.join(s['added']) or '—'}  |  Refreshed: {', '.join(s['refreshed']) or '—'}")
 
 
+# auto refresh, only in DMM mode
+@st.fragment(run_every="10s")
+def _live_dmm(user_id: str, saved: set):
+    if st.session_state.pop("_skip_refresh", False):
+        pass  # full rerun just after an update: keep the "ok" status on screen
+    else:
+        _refresh_keywords(user_id)
+        if ((st.session_state.get("_kw_refresh") or {}).get("result") or {}).get("llm") == "ok":
+            st.session_state._skip_refresh = True
+            st.rerun(scope="app")  # reloads user, keywords and the "In grafeo" column
+    st.session_state.get("_dmm_queries_cache", {}).pop((API_BASE, user_id), None)
+    _render_dmm_queries(user_id, saved)
+    _render_refresh_status(user_id)
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
@@ -493,9 +506,6 @@ def page_list():
         row[1].write(u["surname"])
         row[2].code(uid)
         if row[3].button("View", key=f"view_{uid}"):
-            # if we are in DMM mode, activate the automatic refresh
-            if DMM_MODE:
-                _refresh_keywords(uid)
             _nav("view", uid)
             st.rerun()
         if row[4].button("Edit", key=f"edit_{uid}"):
@@ -598,10 +608,12 @@ def page_view():
                             st.error(f"Could not update session: {e}")
 
     # Queries the DMM has logged under this user's ID
-    dmm_queries = _render_dmm_queries(user_id, _saved_query_times(user))
-
-    # to check the refresh status
-    _render_refresh_status(user_id)
+    if DMM_MODE:
+        _live_dmm(user_id, _saved_query_times(user))
+        dmm_queries = []  # only used below in "... or DMM_MODE or dmm_queries", already True here
+    else:
+        dmm_queries = _render_dmm_queries(user_id, _saved_query_times(user))
+        _render_refresh_status(user_id)
 
     # Keywords
     kws = user.get("keywords", [])
