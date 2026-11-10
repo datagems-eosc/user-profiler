@@ -217,7 +217,7 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.get(
                 f"{DMM_URL}/api/v1/aplog/search",
-                pparams={
+                params={
                     "userId": user_id,
                     "operator": ["NLQ_Operator", "CDD_Operator"],
                     "limit": MAX_STORED_QUERIES,
