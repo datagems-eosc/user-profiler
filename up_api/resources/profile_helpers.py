@@ -10,6 +10,17 @@ KEYWORD_MIN_WEIGHT = float(os.getenv("KEYWORD_MIN_WEIGHT", "0.1"))
 ORCID_KEYWORD_WEIGHT = float(os.getenv("ORCID_KEYWORD_WEIGHT", "0.5"))
 
 
+# FOR THE AUTOMATIC QUERY REFRESH
+# importing the DMM query object
+from .data_models import DMMQuery
+#   fixed sessionId of the per-user Session that stores the queries fetched from the DMM
+HISTORY_SESSION_ID = "dmm-history"
+#   fixingf the max amount of queries stored
+#       keeping only the last 50
+#       --> env var so can be changed form the cluster config without redeploying the service
+MAX_STORED_QUERIES = int(os.getenv("MAX_STORED_QUERIES", "50"))
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -119,3 +130,51 @@ def build_interest_profile(profile: dict) -> dict:
         "affiliation": profile.get("affiliation"),
         "orcid": {"id": orcid["id"]} if orcid else None,
     }
+
+
+
+# ---------------------------------------------------------------------------
+# DMM query history (stored in the "dmm-history" session)
+# ---------------------------------------------------------------------------
+
+def _history(profile: dict) -> Optional[dict]:
+    '''
+    Returns the per-user Session that stores the queries fetched from the DMM, or None
+    '''
+    return next((s for s in profile["sessions"] if s["sessionId"] == HISTORY_SESSION_ID), None)
+
+def last_processed_at(profile: dict) -> Optional[datetime]:
+    '''
+    Returns the timestamp of the most recent query already saved in the history
+    '''
+    history = _history(profile)
+    return max((_parse_dt(q["typedAt"]) for q in history["queries"]), default=None) if history else None
+
+def remember_queries(profile: dict, new_queries: list[DMMQuery]) -> None:
+    '''
+    Addes the new queires to the history
+        - if the ddm-history does not exist yet, it is created
+        - if the ddm-history exists, the new queries are appended to it
+        - sort the queries using the timestamp, to keep only the last MAX_STORED_QUERIES queries
+    '''
+    history = _history(profile)
+    if not new_queries:
+            return 
+    
+    # creating the dmm-history session if it does not exist yet
+    if history is None:
+        history = {"sessionId": HISTORY_SESSION_ID, "extracted": True, "queries": []}
+        profile["sessions"].append(history)
+        
+    # adding the queries to the history
+    history["queries"] += [q.model_dump() for q in new_queries]
+    
+    # sorting the queries 
+    history["queries"] = sorted(history["queries"], key=lambda q: _parse_dt(q["typedAt"]))[-MAX_STORED_QUERIES:]
+    
+    # add the start and end time to the history session
+    #   metadata to keeo the session valid and readable
+    history["startTime"] = history["queries"][0]["typedAt"]
+    history["endTime"] = history["queries"][-1]["typedAt"]
+    
+    
