@@ -362,8 +362,11 @@ def _render_dmm_queries(user_id: str) -> list[dict]:
                 cache[key] = {"queries": _get(f"/user/{user_id}/queries_test", timeout=30).get("queries", [])}
         except requests.HTTPError as e:
             # Not cached, so the next rerun tries again (e.g. after pasting a token with the DMM audience)
-            st.error(f"Could not load DMM queries ({e.response.status_code}): "
-                     f"{e.response.json().get('detail', e)}")
+            try:
+                detail = e.response.json().get("detail", e)
+            except ValueError:  # corpo non JSON (500 plain text, HTML di un proxy, vuoto)
+                detail = e.response.text[:300] or e
+            st.error(f"Could not load DMM queries ({e.response.status_code}): {detail}")
             return []
         except Exception as e:
             st.error(f"Could not load DMM queries: {e}")
