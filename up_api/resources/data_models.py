@@ -1,8 +1,9 @@
 from typing import Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
 
 
 # ---------------------------------------------------------------------------
@@ -105,3 +106,32 @@ class UserEdit(BaseModel):
     location: Optional[Location] = None
     orcid: Optional[ORCID] = None
     sessions: Optional[list[Session]] = None
+
+
+
+#----------------------------------------------------------------------------
+# Query event
+#---------------------------------------------------------------------------
+
+class DMMQuery(Query):
+    '''
+    Edits Query:
+        - now tyepedAt is required and will be converted to UTC if not already
+            --> It assumed that a time without timezone is in UTC
+    '''
+    
+    typedAt: datetime
+
+    @field_validator("typedAt")
+    @classmethod
+    def to_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+
+class QueryEvent(BaseModel):
+    '''
+    Event body for a query event, used to notify about a new query
+    '''
+    query: str
