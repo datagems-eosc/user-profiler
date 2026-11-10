@@ -554,30 +554,6 @@ def page_view():
         loc = user["location"]
         st.write(f"{loc['city']}, {loc['country']}")
 
-    # Keywords
-    kws = user.get("keywords", [])
-    col_kw, col_kw_btn = st.columns([5, 1])
-    with col_kw:
-        st.subheader("Keywords")
-    if kws:
-        with col_kw_btn:
-            if st.button("Clear all", key="btn_clear_kw"):
-                try:
-                    _patch(f"/user/{user_id}", {"keywords": []})
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not clear keywords: {e}")
-        weighted = _weighted_keywords(user_id)
-        session_weighted = [k for k in weighted or [] if k["source"] == "session"]
-        if session_weighted:
-            _render_keyword_tags(session_weighted)
-            st.caption("Weight halves every 30 days (by default) since the keyword was last extracted. "
-                       "Struck-through keywords have expired: they are no longer sent to other services, "
-                       "until they are extracted again.")
-        else:
-            _render_keyword_tags(kws)
-    else:
-        st.caption("No keywords yet.")
 
     # ORCID
     if user.get("orcid"):
@@ -626,6 +602,31 @@ def page_view():
 
     # to check the refresh status
     _render_refresh_status(user_id)
+
+    # Keywords
+    kws = user.get("keywords", [])
+    col_kw, col_kw_btn = st.columns([5, 1])
+    with col_kw:
+        st.subheader("Keywords")
+    if kws:
+        with col_kw_btn:
+            if st.button("Clear all", key="btn_clear_kw"):
+                try:
+                    _patch(f"/user/{user_id}", {"keywords": []})
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not clear keywords: {e}")
+        weighted = _weighted_keywords(user_id)
+        session_weighted = [k for k in weighted or [] if k["source"] == "session"]
+        if session_weighted:
+            _render_keyword_tags(session_weighted)
+            st.caption("Weight halves every 30 days (by default) since the keyword was last extracted. "
+                        "Struck-through keywords have expired: they are no longer sent to other services, "
+                        "until they are extracted again.")
+        else:
+            _render_keyword_tags(kws)
+    else:
+        st.caption("No keywords yet.")
 
     # Keyword generation from sessions
     all_queries = [
