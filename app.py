@@ -296,7 +296,7 @@ def _render_keyword_tags(kws: list[dict]) -> None:
         label = k["value"] if weight is None else f'{k["value"]} · {weight:.2f}'
         opacity = 1.0 if weight is None else max(0.35, weight)
         strike = "text-decoration:line-through;" if k.get("expired") else ""
-        return (f'<span style="background:#e8f4f8; border:1px solid #aecfe0; border-radius:14px; '
+        return (f'<span style="background:#e8f4f8; color:#1a3a4a; border:1px solid #aecfe0; border-radius:14px; '
                 f'padding:3px 12px; margin:3px; display:inline-block; font-size:0.9rem; '
                 f'opacity:{opacity}; {strike}">{label}</span>')
 
@@ -343,9 +343,25 @@ def _add_dmm_user():
                 st.error(f"Could not add user: {e}")
 
 
-def _render_dmm_queries(user_id: str) -> dict:
-    """Show the queries the DMM has under this user ID and return them ({timestamp: query}, empty on error).
-    Cached per endpoint and user, so the DMM is only asked again on Refresh."""
+def _saved_query_times(user: dict) -> set:
+    '''
+    typedAt of the queries already saved in grafeo, parsed so "...Z" and "...+00:00" compare equal
+    '''
+    times = set()
+    for s in user.get("sessions", []):
+        for q in s.get("queries", []):
+            try:
+                times.add(datetime.fromisoformat(str(q["typedAt"])))
+            except (KeyError, ValueError):
+                pass
+    return times
+
+
+
+def _render_dmm_queries(user_id: str, saved: set = frozenset()) -> list[dict]:
+    '''
+    Show the queries the DMM has under this user ID and return them ([{text, typedAt}], empty on error)
+    '''
     cache = st.session_state.setdefault("_dmm_queries_cache", {})
     key = (API_BASE, user_id)
 
@@ -358,15 +374,18 @@ def _render_dmm_queries(user_id: str) -> dict:
     if key not in cache:
         try:
             with st.spinner("Asking the DMM..."):
-                cache[key] = {"queries": _get(f"/user/{user_id}/queries_test", timeout=30).get("queries", {})}
+                cache[key] = {"queries": _get(f"/user/{user_id}/queries_test", timeout=30).get("queries", [])}
         except requests.HTTPError as e:
             # Not cached, so the next rerun tries again (e.g. after pasting a token with the DMM audience)
-            st.error(f"Could not load DMM queries ({e.response.status_code}): "
-                     f"{e.response.json().get('detail', e)}")
-            return {}
+            try:
+                detail = e.response.json().get("detail", e)
+            except ValueError:  # corpo non JSON (500 plain text, HTML di un proxy, vuoto)
+                detail = e.response.text[:300] or e
+            st.error(f"Could not load DMM queries ({e.response.status_code}): {detail}")
+            return []
         except Exception as e:
             st.error(f"Could not load DMM queries: {e}")
-            return {}
+            return []
 
     queries = cache[key]["queries"]
     if not queries:
@@ -374,7 +393,10 @@ def _render_dmm_queries(user_id: str) -> dict:
     else:
         st.caption(f"{len(queries)} queries, newest first")
         st.dataframe(
-            [{"timestamp": ts, "query": q} for ts, q in sorted(queries.items(), key=lambda kv: str(kv[0]), reverse=True)],
+            [{"saved": datetime.fromisoformat(q["typedAt"]) in saved,
+              "timestamp": q["typedAt"], "query": q["text"]}
+             for q in sorted(queries, key=lambda q: q["typedAt"], reverse=True)],
+            column_config={"saved": st.column_config.CheckboxColumn("In grafeo")},
             hide_index=True,
             width="stretch",
         )
@@ -382,6 +404,61 @@ def _render_dmm_queries(user_id: str) -> dict:
 
 
 
+# For testing the automatic refresh of keywords (using DMM queries)
+_KW_ICONS = {"ok": "🟢", "error": "🔴", "skipped": "⚪"}
+
+
+def _refresh_keywords(user_id: str) -> None:
+    '''
+    Turns the user's new DMM queries into keywords
+        --> the outcome is shown by page_view
+    '''
+    state = {"user_id": user_id, "result": None, "error": None}
+    try:
+        with st.spinner("Refreshing keywords from new DMM queries..."):
+            r = requests.post(f"{API_BASE}/user/{user_id}/refresh-keyword_test", headers=HEADERS, timeout=300)
+        r.raise_for_status()
+        state["result"] = r.json()
+    except requests.HTTPError as e:
+        state["error"] = f"{e.response.status_code}: {e.response.text[:200]}"
+    except Exception as e:
+        state["error"] = str(e)
+    st.session_state._kw_refresh = state
+
+
+def _render_refresh_status(user_id: str) -> None:
+    '''
+    renders the status of the refresh
+    '''
+    state = st.session_state.get("_kw_refresh")
+    if not state or state["user_id"] != user_id:
+        return
+    if state["error"]:
+        st.error(f"Keyword refresh failed: {state['error']}")
+        return
+    s = state["result"]
+    dmm, llm = st.columns(2)
+    dmm.write(f"{_KW_ICONS[s['dmm']]} DMM: {s['dmm']}")
+    llm.write(f"{_KW_ICONS[s['llm']]} LLM: {s['llm']}")
+    if s["detail"]:
+        st.warning(s["detail"])
+    if s["added"] or s["refreshed"]:
+        st.caption(f"New: {', '.join(s['added']) or '—'}  |  Refreshed: {', '.join(s['refreshed']) or '—'}")
+
+
+# auto refresh, only in DMM mode
+@st.fragment(run_every="10s")
+def _live_dmm(user_id: str, saved: set):
+    if st.session_state.pop("_skip_refresh", False):
+        pass  # full rerun just after an update: keep the "ok" status on screen
+    else:
+        _refresh_keywords(user_id)
+        if ((st.session_state.get("_kw_refresh") or {}).get("result") or {}).get("llm") == "ok":
+            st.session_state._skip_refresh = True
+            st.rerun(scope="app")  # reloads user, keywords and the "In grafeo" column
+    st.session_state.get("_dmm_queries_cache", {}).pop((API_BASE, user_id), None)
+    _render_dmm_queries(user_id, saved)
+    _render_refresh_status(user_id)
 # ---------------------------------------------------------------------------
 # Pages
 # ---------------------------------------------------------------------------
@@ -487,30 +564,6 @@ def page_view():
         loc = user["location"]
         st.write(f"{loc['city']}, {loc['country']}")
 
-    # Keywords
-    kws = user.get("keywords", [])
-    col_kw, col_kw_btn = st.columns([5, 1])
-    with col_kw:
-        st.subheader("Keywords")
-    if kws:
-        with col_kw_btn:
-            if st.button("Clear all", key="btn_clear_kw"):
-                try:
-                    _patch(f"/user/{user_id}", {"keywords": []})
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not clear keywords: {e}")
-        weighted = _weighted_keywords(user_id)
-        session_weighted = [k for k in weighted or [] if k["source"] == "session"]
-        if session_weighted:
-            _render_keyword_tags(session_weighted)
-            st.caption("Weight halves every 30 days (by default) since the keyword was last extracted. "
-                       "Struck-through keywords have expired: they are no longer sent to other services, "
-                       "until they are extracted again.")
-        else:
-            _render_keyword_tags(kws)
-    else:
-        st.caption("No keywords yet.")
 
     # ORCID
     if user.get("orcid"):
@@ -555,7 +608,37 @@ def page_view():
                             st.error(f"Could not update session: {e}")
 
     # Queries the DMM has logged under this user's ID
-    dmm_queries = _render_dmm_queries(user_id)
+    if DMM_MODE:
+        _live_dmm(user_id, _saved_query_times(user))
+        dmm_queries = []  # only used below in "... or DMM_MODE or dmm_queries", already True here
+    else:
+        dmm_queries = _render_dmm_queries(user_id, _saved_query_times(user))
+        _render_refresh_status(user_id)
+
+    # Keywords
+    kws = user.get("keywords", [])
+    col_kw, col_kw_btn = st.columns([5, 1])
+    with col_kw:
+        st.subheader("Keywords")
+    if kws:
+        with col_kw_btn:
+            if st.button("Clear all", key="btn_clear_kw"):
+                try:
+                    _patch(f"/user/{user_id}", {"keywords": []})
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not clear keywords: {e}")
+        weighted = _weighted_keywords(user_id)
+        session_weighted = [k for k in weighted or [] if k["source"] == "session"]
+        if session_weighted:
+            _render_keyword_tags(session_weighted)
+            st.caption("Weight halves every 30 days (by default) since the keyword was last extracted. "
+                        "Struck-through keywords have expired: they are no longer sent to other services, "
+                        "until they are extracted again.")
+        else:
+            _render_keyword_tags(kws)
+    else:
+        st.caption("No keywords yet.")
 
     # Keyword generation from sessions
     all_queries = [
@@ -825,7 +908,9 @@ DMM_URL = os.getenv("DMM_URL", "https://datagems-dev.scayle.es/dmm").rstrip("/")
 
 
 def _recent_dmm_queries(n: int) -> list[dict]:
-    """The n most recent NLQ/CDD queries by any user, newest first, straight from the DMM."""
+    '''
+    The n most recent NLQ/CDD queries by any user, newest first, straight from the DMM
+    '''
     # The DMM doesn't sort by time, so fetch a large page and sort here
     r = requests.get(
         f"{DMM_URL}/api/v1/aplog/search",
@@ -917,13 +1002,13 @@ def _dmm_user_queries():
         st.error(f"Could not load queries: {e}")
         return
 
-    queries = data.get("queries", {})
+    queries = data.get("queries", [])
     if not queries:
         st.info("The DMM has no queries for this user ID.")
         return
     st.markdown(f"**{data['count']} queries**")
     st.dataframe(
-        [{"timestamp": ts, "query": q} for ts, q in sorted(queries.items(), key=lambda kv: str(kv[0]), reverse=True)],
+        [{"timestamp": q["typedAt"], "query": q["text"]} for q in reversed(queries)],
         hide_index=True,
         width="stretch",
     )

@@ -2,11 +2,15 @@ from contextlib import asynccontextmanager
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+import asyncio
+from collections import defaultdict
+import logging
+
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import RedirectResponse
 
 from .resources import security
-from .resources.data_models import KeywordsAppend, UserCreate, UserEdit, UserProfile
+from .resources.data_models import DMMQuery, KeywordsAppend, QueryEvent, UserCreate, UserEdit, UserProfile
 from .resources.graph_helpers import (
     init_db,
     close_db,
@@ -18,8 +22,11 @@ from .resources.graph_helpers import (
 from .resources.orcid_helpers import fetch_orcid_profile
 from .resources.LLM_helpers import generate_keywords_from_session
 from .resources.profile_helpers import (
+    MAX_STORED_QUERIES,
     append_keywords,
     build_interest_profile,
+    last_processed_at,
+    remember_queries,
     stamp_keywords,
     weighted_keywords,
 )
@@ -32,6 +39,19 @@ from fastapi.security import OAuth2PasswordBearer
 # for auth
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+
+# Crearte a logger for this module
+logger = logging.getLogger(__name__)
+
+# configuring the logger to track the refresh process 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# set the attemps and the interval of attemps for the refresh
+#   if the notify query is still not in the DMM
+#       if the DMM is not reachable, the error is recorded in the logs
+#       if after the attemp the refresh carries on
+DMM_QUERY_ATTEMPTS = int(os.getenv("DMM_QUERY_ATTEMPTS", "3"))
+DMM_QUERY_RETRY_SECONDS = float(os.getenv("DMM_QUERY_RETRY_SECONDS", "2"))
 
 # Data managment model url
 DMM_URL = os.getenv("DMM_URL", "https://datagems-dev.scayle.es/dmm").rstrip("/")
@@ -163,12 +183,15 @@ async def get_orcid_profile(orcid_id: str):
 # Retriving user's query history
 
 # extract user's queries from a json payload
-def extract_queries(aplogs: list[dict]) -> dict[str, str]:
+def extract_queries(aplogs: list[dict]) -> list[DMMQuery]:
     '''
-    Extract the user's natural-language queries from DMM aplog/search results.
-    Returns {timestamp: query}.
+    extract the user's natural-language queries from DMM aplog/search results
+    
+    Returns
+        - a list of DMMQuery (text + typedAt in UTC)
+            --> queries without a timestamp are skipped
     '''
-    queries = {}
+    queries = []
     for log in aplogs:
         nodes = log["ap"]["nodes"]
         ap = next((n for n in nodes if "Analytical_Pattern" in n["labels"]), {})
@@ -177,11 +200,12 @@ def extract_queries(aplogs: list[dict]) -> dict[str, str]:
             # SQL operators also carry a "query" property
             if "Operator" in n["labels"] and "SQL_Operator" not in n["labels"] and props.get("query"):
                 timestamp = props.get("startTime") or ap.get("properties", {}).get("startTime")
-                queries[timestamp] = props["query"]
+                if timestamp:
+                    queries.append(DMMQuery(text=props["query"], typedAt=timestamp))
     return queries
 
 # exectute the http request to DMM
-async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
+async def fetch_user_queries(token: str, user_id: str) -> list[DMMQuery]:
     '''
     Input:
         - token (str) security token (auth)
@@ -199,7 +223,7 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
                 params={
                     "userId": user_id,
                     "operator": ["NLQ_Operator", "CDD_Operator"],
-                    "limit": 50,
+                    "limit": MAX_STORED_QUERIES,
                 },
                 headers={"Authorization": f"Bearer {token}"},
             )
@@ -208,7 +232,7 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
 
     # 404 -> no logs available
     if r.status_code == 404:
-        return {}
+        return []
     # Any other DMM error (e.g. 401/403 if it rejects the forwarded token) is reported as a 502 with its status
     if r.is_error:
         raise HTTPException(status_code=502, detail=f"The DMM returned {r.status_code}: {r.text[:200]}")
@@ -217,6 +241,169 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=502, detail="The DMM returned an unexpected response") from exc
 
+
+
+# =================================
+# Automatic keyword refresh
+
+
+# creating a lock for each user to avoid concurrent refreshes
+_refresh_locks = defaultdict(asyncio.Lock)
+
+def _norm(text: str) -> str:
+    '''collapses whitespace, so the notified text and the DMM one compare equal'''
+    return " ".join(text.split())
+
+
+async def _fetch_new_queries(user_id: str, token: str, last, query: str | None) -> list[DMMQuery]:
+    '''
+    Fetches the user's queries from the DMM and keeps only those newer than the last
+    processed one.
+
+    Input:
+        - user_id (str): id of the user 
+        - token (str): bearer token 
+        - last (datetime | None): timestamp of the last processed query
+        - query (str | None): text of the query notified by the QR
+
+    Returns:
+        - list[DMMQuery]: the new queries
+
+    Raises:
+        - HTTPException (502): DMM cannot be reached or returns an error
+    '''
+
+    # try to fetch 
+        #   for DMM_QUERY_ATTEMPTS times, waiting DMM_QUERY_RETRY_SECONDS between each attempt
+    for attempt in range(DMM_QUERY_ATTEMPTS):
+        fetched = await fetch_user_queries(token, user_id)
+        new_queries = [q for q in fetched if not last or q.typedAt > last]
+        if query is None or any(_norm(q.text) == _norm(query) for q in new_queries):
+            break
+        if attempt < DMM_QUERY_ATTEMPTS - 1:
+            await asyncio.sleep(DMM_QUERY_RETRY_SECONDS)
+
+    # warning if the notified query is not in the DMM after the attempts
+    # or if the notified query has been already processed
+    else:
+        # if the notified query is not in the DMM
+        #   --> so if the for loop never breaks
+        if any(_norm(q.text) == _norm(query) for q in fetched):
+            logger.info("Refresh of %s: notified query already processed: %r", user_id, query[:80])
+        else:
+            logger.warning("Refresh of %s: notified query not found in the DMM after %d attempts: %r",
+                            user_id, DMM_QUERY_ATTEMPTS, query[:80])
+    return new_queries
+
+
+async def refresh_user_keywords(user_id: str, token: str, query: str | None = None) -> dict:
+    '''
+    Refreshes the user's keywords from the queries added to the DMM since the last refresh.
+
+    Input:
+        - user_id (str): id of the user 
+        - token (str): bearer token 
+        - query (str | None): text of the query notified by the QR
+
+    Returns:
+        - dict with:
+            - dmm (str): "ok" | "error"
+            - llm (str): "ok" | "error" | "skipped" (skipped == no new queries)
+            - detail (str | None): any error message
+            - added (list[str]): keywords not in the profile yet
+            - refreshed (list[str]): keywords already present
+
+    Raises:
+        - HTTPException (404): user does not exist 
+    '''
+    
+    # result initialization
+    result = {"dmm": "ok", "llm": "skipped", "detail": None, "added": [], "refreshed": []}
+
+
+    # checks the last processed query timestamp and fetches the new queries from the DMM
+    async with _refresh_locks[user_id]:
+        last = last_processed_at(_require_user(user_id))
+        try:
+            new_queries = await _fetch_new_queries(user_id, token, last, query)
+        except HTTPException as exc:
+            logger.warning("Keyword refresh of %s: %s", user_id, exc.detail)
+            return result | {"dmm": "error", "detail": exc.detail}
+        if not new_queries:
+            return result
+
+        try:
+            keywords = await asyncio.to_thread(generate_keywords_from_session, {}, queries=new_queries)
+        except Exception:
+            logger.exception("Keyword refresh of %s: unexpected LLM error", user_id)
+            keywords = None
+        if keywords is None:
+            detail = "The LLM could not be reached or returned an invalid response"
+            logger.warning("Keyword refresh of %s: %s", user_id, detail)
+            return result | {"llm": "error", "detail": detail}
+
+        profile = load_user_profile(user_id)  # può essere cambiato durante la chiamata LLM
+        if profile is None:
+            return result | {"llm": "ok", "detail": "User deleted during the refresh"}
+        profile["keywords"], added = append_keywords(profile["keywords"], keywords)
+        remember_queries(profile, new_queries)
+        _save(profile)
+
+    return result | {"llm": "ok", "added": added, "refreshed": [k for k in keywords if k not in added]}
+
+
+#=============================
+# Notify a new query
+
+# to track the refresh process 
+async def _refresh_in_background(user_id: str, token: str, query: str) -> None:
+    '''
+    Runs the refresh after the 202 
+        --> logs its outcome
+    '''
+    try:
+        r = await refresh_user_keywords(user_id, token, query)
+        logger.info("Refresh of %s: dmm=%s llm=%s added=%s refreshed=%s detail=%s",
+                    user_id, r["dmm"], r["llm"], r["added"], r["refreshed"], r["detail"])
+    except Exception:
+        logger.exception("Refresh of %s failed", user_id)
+
+
+@protected.post("/user/{user_id}/queries", status_code=202, summary="Notify that the user has performed a new query (triggers a refresh)")
+def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks, token: str = Depends(oauth2_scheme)):
+    '''
+    notify that the user has performed a new query
+        --> triggers the refresh
+    
+    Input:
+        - user_id (str): id of the user
+        - payload (QueryEvent): the query event
+        - tasks (BackgroundTasks): background tasks to be executed
+        - token (str): security check 
+    '''
+    _require_user(user_id)
+    logger.info("Query notified for %s: %r", user_id, payload.query[:80])
+    tasks.add_task(_refresh_in_background, user_id, token, payload.query)
+    return {"status": "accepted"}
+
+
+# ==============================
+# TEST automatic refresh
+
+@protected.post("/user/{user_id}/refresh-keyword_test", summary="Dev: refresh user's keywords from the DMM (for testing)")
+async def refresh_keywords(user_id: str, token: str = Depends(oauth2_scheme)):
+    '''
+    refreshes user's keywords 
+    
+    Input:
+        - user_id (str): id of the user
+        - token (str): security check
+    '''
+    return await refresh_user_keywords(user_id, token)
+
+
+#==============================
+# TEST DMM connection
 
 # for testing the DMM connection
 @protected.get("/user/{user_id}/queries_test", summary="Dev: queries of a user, extracted from DMM")
