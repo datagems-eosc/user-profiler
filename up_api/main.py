@@ -43,6 +43,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 # Crearte a logger for this module
 logger = logging.getLogger(__name__)
 
+# configuring the logger to track the refresh process 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
 # set the attemps and the interval of attemps for the refresh
 #   if the notify query is still not in the DMM
 #       if the DMM is not reachable, the error is recorded in the logs
@@ -202,7 +205,7 @@ def extract_queries(aplogs: list[dict]) -> list[DMMQuery]:
     return queries
 
 # exectute the http request to DMM
-async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
+async def fetch_user_queries(token: str, user_id: str) -> list[DMMQuery]:
     '''
     Input:
         - token (str) security token (auth)
@@ -247,6 +250,10 @@ async def fetch_user_queries(token: str, user_id: str) -> dict[str, str]:
 # creating a lock for each user to avoid concurrent refreshes
 _refresh_locks = defaultdict(asyncio.Lock)
 
+def _norm(text: str) -> str:
+    '''collapses whitespace, so the notified text and the DMM one compare equal'''
+    return " ".join(text.split())
+
 
 async def _fetch_new_queries(user_id: str, token: str, last, query: str | None) -> list[DMMQuery]:
     '''
@@ -265,16 +272,29 @@ async def _fetch_new_queries(user_id: str, token: str, last, query: str | None) 
     Raises:
         - HTTPException (502): DMM cannot be reached or returns an error
     '''
-    
+
     # try to fetch 
-    #   for DMM_QUERY_ATTEMPTS times, waiting DMM_QUERY_RETRY_SECONDS between each attempt
+        #   for DMM_QUERY_ATTEMPTS times, waiting DMM_QUERY_RETRY_SECONDS between each attempt
     for attempt in range(DMM_QUERY_ATTEMPTS):
-        new_queries = [q for q in await fetch_user_queries(token, user_id) if not last or q.typedAt > last]
-        if query is None or any(q.text.strip() == query.strip() for q in new_queries):
+        fetched = await fetch_user_queries(token, user_id)
+        new_queries = [q for q in fetched if not last or q.typedAt > last]
+        if query is None or any(_norm(q.text) == _norm(query) for q in new_queries):
             break
         if attempt < DMM_QUERY_ATTEMPTS - 1:
             await asyncio.sleep(DMM_QUERY_RETRY_SECONDS)
+
+    # warning if the notified query is not in the DMM after the attempts
+    # or if the notified query has been already processed
+    else:
+        # if the notified query is not in the DMM
+        #   --> so if the for loop never breaks
+        if any(_norm(q.text) == _norm(query) for q in fetched):
+            logger.info("Refresh of %s: notified query already processed: %r", user_id, query[:80])
+        else:
+            logger.warning("Refresh of %s: notified query not found in the DMM after %d attempts: %r",
+                            user_id, DMM_QUERY_ATTEMPTS, query[:80])
     return new_queries
+
 
 async def refresh_user_keywords(user_id: str, token: str, query: str | None = None) -> dict:
     '''
@@ -335,6 +355,20 @@ async def refresh_user_keywords(user_id: str, token: str, query: str | None = No
 #=============================
 # Notify a new query
 
+# to track the refresh process 
+async def _refresh_in_background(user_id: str, token: str, query: str) -> None:
+    '''
+    Runs the refresh after the 202 
+        --> logs its outcome
+    '''
+    try:
+        r = await refresh_user_keywords(user_id, token, query)
+        logger.info("Refresh of %s: dmm=%s llm=%s added=%s refreshed=%s detail=%s",
+                    user_id, r["dmm"], r["llm"], r["added"], r["refreshed"], r["detail"])
+    except Exception:
+        logger.exception("Refresh of %s failed", user_id)
+
+
 @protected.post("/user/{user_id}/queries", status_code=202, summary="Notify that the user has performed a new query (triggers a refresh)")
 def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks, token: str = Depends(oauth2_scheme)):
     '''
@@ -348,7 +382,8 @@ def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks, toke
         - token (str): security check 
     '''
     _require_user(user_id)
-    tasks.add_task(refresh_user_keywords, user_id, token, payload.query)
+    logger.info("Query notified for %s: %r", user_id, payload.query[:80])
+    tasks.add_task(_refresh_in_background, user_id, token, payload.query)
     return {"status": "accepted"}
 
 
