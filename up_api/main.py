@@ -526,7 +526,7 @@ async def get_user_queries(user_id: str, token: str = Depends(oauth2_scheme)):
 # =================================
 # Generating user's kewywords
 
-# TODO: add fetch_usqer_queries call (+ add token handling)
+
 @protected.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
 async def get_generated_keywords(user_id: str, token: str = Depends(oauth2_scheme)):
     profile = _require_user(user_id)
