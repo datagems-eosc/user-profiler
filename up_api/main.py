@@ -80,6 +80,11 @@ app = FastAPI(
 protected = APIRouter(dependencies=[Depends(security.require_app_scope)])
 
 
+#=========================
+# FUNCTIONS FOR INTERNAL USE
+#=========================
+
+
 def _save(profile: dict) -> UserProfile:
     """Rewrite the user's whole subgraph from a (modified) profile dict."""
     updated = UserProfile(**profile)
@@ -95,7 +100,7 @@ def _require_user(user_id: str) -> dict:
     return profile
 
 
-#=========================================
+#--------------------------------
 # User Creation
 
 def _create(user_id: str, payload: UserCreate) -> UserProfile:
@@ -131,7 +136,7 @@ def _user_from_token(claims: dict) -> UserCreate:
     )
 
 
-#=========================================
+#--------------------------------
 # User Editing
 
 def _apply_edit(current: dict, payload: UserEdit) -> UserProfile:
@@ -146,8 +151,29 @@ def _apply_edit(current: dict, payload: UserEdit) -> UserProfile:
     return _save(current)
 
 
+#-------------------------------
+# User Creation from token
+
+def _ensure_user(user_id: str, claims: dict) -> bool:
+    '''
+    (temporary)
+    
+    Creates the token's own user the first time the UP sees it
+    Returns True if created.
+    '''
+    with _create_lock:
+        if load_user_profile(user_id) is not None:
+            return False
+        if claims.get("sub") != user_id:
+            raise HTTPException(status_code=404, detail=f"No such user: '{user_id}'")
+        _create(user_id, _user_from_token(claims))
+        logger.info("User %s not in the graph: created from the token", user_id)
+        return True
+
+
 #=========================================
 # API endpoints
+#=========================================
 
 @app.get("/", include_in_schema=False)
 async def home():
@@ -196,6 +222,8 @@ def append_user_keywords(user_id: str, payload: KeywordsAppend):
 # ensures the same user is not created twice by concurrent requests
 _create_lock = threading.Lock()
 
+
+# new endpoint for the UI
 @protected.post("/user/me", status_code=201, summary="Create the token's own user, or complete it if it already exists")
 def create_me(response: Response, payload: UserEdit | None = None,
               claims: dict = Depends(security.require_app_scope)):
@@ -218,6 +246,8 @@ def create_me(response: Response, payload: UserEdit | None = None,
             return _create(user_id, UserCreate(**(_user_from_token(claims).model_dump() | body)))
         response.status_code = 200
         return _apply_edit(current, UserEdit(**body)) if body else UserProfile(**current)
+
+
 
 # kept for testing
 @protected.post("/user", status_code=201, summary="Dev: create a user with a random ID ")
@@ -446,22 +476,20 @@ async def _refresh_in_background(user_id: str, token: str, query: str) -> None:
         logger.exception("Refresh of %s failed", user_id)
 
 
+
+
 @protected.post("/user/{user_id}/queries", status_code=202, summary="Notify that the user has performed a new query (triggers a refresh)")
-def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks, token: str = Depends(oauth2_scheme)):
+def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks,
+                 token: str = Depends(oauth2_scheme),
+                 claims: dict = Depends(security.require_app_scope)):
     '''
     notify that the user has performed a new query
-        --> triggers the refresh
-    
-    Input:
-        - user_id (str): id of the user
-        - payload (QueryEvent): the query event
-        - tasks (BackgroundTasks): background tasks to be executed
-        - token (str): security check 
+        --> creates the user if the UP has never seen it, then triggers the refresh
     '''
-    _require_user(user_id)
+    created = _ensure_user(user_id, claims)
     logger.info("Query notified for %s: %r", user_id, payload.query[:80])
     tasks.add_task(_refresh_in_background, user_id, token, payload.query)
-    return {"status": "accepted"}
+    return {"status": "accepted", "created": created}
 
 
 # ==============================
