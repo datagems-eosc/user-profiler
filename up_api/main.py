@@ -6,7 +6,7 @@ import asyncio
 from collections import defaultdict
 import logging
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, BackgroundTasks, Response
 from fastapi.responses import RedirectResponse
 
 from .resources import security
@@ -35,6 +35,8 @@ import json
 
 from typing import Any
 from fastapi.security import OAuth2PasswordBearer
+
+import threading
 
 # for auth
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -78,6 +80,11 @@ app = FastAPI(
 protected = APIRouter(dependencies=[Depends(security.require_app_scope)])
 
 
+#=========================
+# FUNCTIONS FOR INTERNAL USE
+#=========================
+
+
 def _save(profile: dict) -> UserProfile:
     """Rewrite the user's whole subgraph from a (modified) profile dict."""
     updated = UserProfile(**profile)
@@ -92,6 +99,81 @@ def _require_user(user_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"No such user: '{user_id}'")
     return profile
 
+
+#--------------------------------
+# User Creation
+
+def _create(user_id: str, payload: UserCreate) -> UserProfile:
+    '''
+    Single place where a user is created
+    
+    input:
+        - user_id (str): id of the user
+        - payload (UserCreate): user data
+        
+    returns:
+        - UserProfile: user profile
+    '''
+    data = payload.model_dump()
+    data["keywords"] = stamp_keywords(data["keywords"], [])
+    profile = UserProfile(userId=user_id, **data)
+    build_user_subgraph(profile)
+    return profile
+
+
+def _user_from_token(claims: dict) -> UserCreate:
+    '''
+    User data available in the Keycloak token
+    
+    input:
+        - claims (dict): info form the token
+    '''
+    return UserCreate(
+        name=claims.get("given_name") or claims.get("preferred_username") or "-",
+        surname=claims.get("family_name") or "-",
+        email=claims.get("email") or "-",
+        affiliation="unknown",
+    )
+
+
+#--------------------------------
+# User Editing
+
+def _apply_edit(current: dict, payload: UserEdit) -> UserProfile:
+    '''
+    Applies the fields set in payload to the profile and saves it
+    '''
+    previous_keywords = current["keywords"]
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        current[field] = value
+    # Keywords that already existed keep their timestamps, new (or never stamped) ones are stamped now
+    current["keywords"] = stamp_keywords(current["keywords"], previous_keywords)
+    return _save(current)
+
+
+#-------------------------------
+# User creation for unseen users (temporary)
+
+def _ensure_user(user_id: str, claims: dict) -> bool:
+    '''
+    (temporary)
+    
+    Creates the token's own user the first time the UP sees it
+    Returns True if created.
+    '''
+    with _create_lock:
+        if load_user_profile(user_id) is not None:
+            return False
+        if claims.get("sub") != user_id:
+            raise HTTPException(status_code=404, detail=f"No such user: '{user_id}'")
+        _create(user_id, _user_from_token(claims))
+        logger.info("User %s not in the graph: created from the token", user_id)
+        return True
+
+
+#=========================================
+# API endpoints
+#=========================================
 
 @app.get("/", include_in_schema=False)
 async def home():
@@ -133,38 +215,63 @@ def append_user_keywords(user_id: str, payload: KeywordsAppend):
     return {"added": added, "refreshed": refreshed}
 
 
-@protected.post("/user", status_code=201, summary="Create a new user")
+
+#==============================
+# User creation and deletion
+
+# ensures the same user is not created twice by concurrent requests
+_create_lock = threading.Lock()
+
+
+# new endpoint for the UI
+@protected.post("/user/me", status_code=201, summary="Create the token's own user, or complete it if it already exists")
+def create_me(response: Response, payload: UserEdit | None = None,
+              claims: dict = Depends(security.require_app_scope)):
+    '''
+    The user ID is the token's sub
+        - new user: name, surname and email from the token, the body (e.g. {"affiliation": "..."})
+          adds the missing fields or overrides the token's ones --> 201
+        - existing user (e.g. already created by a QR notification): the body is applied
+          as a PATCH --> 200
+    '''
+    
+    # get user id from the token
+    #   + user info
+    user_id = claims["sub"]
+    body = payload.model_dump(exclude_none=True) if payload else {}
+    
+    with _create_lock:
+        current = load_user_profile(user_id)
+        if current is None:
+            return _create(user_id, UserCreate(**(_user_from_token(claims).model_dump() | body)))
+        response.status_code = 200
+        return _apply_edit(current, UserEdit(**body)) if body else UserProfile(**current)
+
+
+
+# kept for testing
+@protected.post("/user", status_code=201, summary="Dev: create a user with a random ID ")
 def create_user(payload: UserCreate):
-    user_id = str(uuid.uuid4())
-    data = payload.model_dump()
-    data["keywords"] = stamp_keywords(data["keywords"], [])
-    profile = UserProfile(userId=user_id, **data)
-    build_user_subgraph(profile)
-    return profile
+    return _create(str(uuid.uuid4()), payload)
 
-#============================================
-# Create user test with DMM id
 
-@protected.post("/user/{user_id}", status_code=201, summary="Create a user with a given ID (e.g. the DMM one)")
+# kept for testing
+@protected.post("/user/{user_id}", status_code=201, summary="Dev: create a user with a given ID")
 def create_user_with_id(user_id: str, payload: UserCreate):
-    
-    # TODO: to swith to /user/me --> For opening an enpoint for the gateway/UI
-    
-    # The ID must be a canonical UUID: it ends up in the graph and must match the one the DMM logs queries under
     try:
         if str(uuid.UUID(user_id)) != user_id:
             raise ValueError
     except ValueError:
         raise HTTPException(status_code=422, detail="user_id must be a lowercase, hyphenated UUID")
-    if load_user_profile(user_id) is not None:
-        raise HTTPException(status_code=409, detail=f"User '{user_id}' already exists")
+    with _create_lock:
+        if load_user_profile(user_id) is not None:
+            raise HTTPException(status_code=409, detail=f"User '{user_id}' already exists")
+        return _create(user_id, payload)
 
-    data = payload.model_dump()
-    data["keywords"] = stamp_keywords(data["keywords"], [])
-    profile = UserProfile(userId=user_id, **data)
-    build_user_subgraph(profile)
-    return profile
 
+@protected.patch("/user/{user_id}", summary="Edit an existing user")
+def edit_user(user_id: str, payload: UserEdit):
+    return _apply_edit(_require_user(user_id), payload)
 
 
 @protected.delete("/user/{user_id}", status_code=200, summary="Delete a user")
@@ -369,22 +476,20 @@ async def _refresh_in_background(user_id: str, token: str, query: str) -> None:
         logger.exception("Refresh of %s failed", user_id)
 
 
+
+
 @protected.post("/user/{user_id}/queries", status_code=202, summary="Notify that the user has performed a new query (triggers a refresh)")
-def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks, token: str = Depends(oauth2_scheme)):
+def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks,
+                 token: str = Depends(oauth2_scheme),
+                 claims: dict = Depends(security.require_app_scope)):
     '''
     notify that the user has performed a new query
-        --> triggers the refresh
-    
-    Input:
-        - user_id (str): id of the user
-        - payload (QueryEvent): the query event
-        - tasks (BackgroundTasks): background tasks to be executed
-        - token (str): security check 
+        --> creates the user if the UP has never seen it, then triggers the refresh
     '''
-    _require_user(user_id)
+    created = _ensure_user(user_id, claims)
     logger.info("Query notified for %s: %r", user_id, payload.query[:80])
     tasks.add_task(_refresh_in_background, user_id, token, payload.query)
-    return {"status": "accepted"}
+    return {"status": "accepted", "created": created}
 
 
 # ==============================
@@ -421,7 +526,7 @@ async def get_user_queries(user_id: str, token: str = Depends(oauth2_scheme)):
 # =================================
 # Generating user's kewywords
 
-# TODO: add fetch_usqer_queries call (+ add token handling)
+
 @protected.get("/user/{user_id}/generate-keywords", summary="Generate keywords from user sessions via LLM")
 async def get_generated_keywords(user_id: str, token: str = Depends(oauth2_scheme)):
     profile = _require_user(user_id)
@@ -435,19 +540,6 @@ async def get_generated_keywords(user_id: str, token: str = Depends(oauth2_schem
     if result is None:
         raise HTTPException(status_code=502, detail="The LLM could not be reached or returned an invalid response")
     return {"keywords": result}
-
-
-@protected.patch("/user/{user_id}", summary="Edit an existing user")
-def edit_user(user_id: str, payload: UserEdit):
-    current = _require_user(user_id)
-    previous_keywords = current["keywords"]
-
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        current[field] = value
-
-    # Keywords that already existed keep their timestamps, new (or never stamped) ones are stamped now
-    current["keywords"] = stamp_keywords(current["keywords"], previous_keywords)
-    return _save(current)
 
 
 # Included last: include_router copies the routes registered on the router so far
