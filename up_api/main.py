@@ -152,7 +152,7 @@ def _apply_edit(current: dict, payload: UserEdit) -> UserProfile:
 
 
 #-------------------------------
-# User Creation from token
+# User creation for unseen users (temporary)
 
 def _ensure_user(user_id: str, claims: dict) -> bool:
     '''
