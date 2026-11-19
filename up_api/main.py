@@ -265,7 +265,14 @@ def get_my_keywords(tasks: BackgroundTasks,
 
 @protected.get("/user/me", summary="Retrieve the token's own user")
 def get_me(claims: dict = Depends(security.require_app_scope)):
-    return _require_user(claims['sub'])
+    profile = _require_user(claims["sub"])
+    
+    # queries: the UI already displays them
+    profile.pop('sessions') 
+    
+    # keywords: there is a specific endpiont to retrive them
+    profile.pop('keywords')
+    return profile
 
 
 @protected.patch("/user/me", summary="Edit the token's own user")
