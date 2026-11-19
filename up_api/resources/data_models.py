@@ -135,3 +135,22 @@ class QueryEvent(BaseModel):
     Event body for a query event, used to notify about a new query
     '''
     query: str
+    
+    
+
+#----------------------------------------------------------------------------
+# User's profile edit
+#---------------------------------------------------------------------------
+
+class UserMe(BaseModel):
+    '''
+    Fields the user can edit from the UI
+        --> excluding sessions and keywords
+    '''
+    name: Optional[str] = None
+    surname: Optional[str] = None
+    dateOfBirth: Optional[datetime] = None
+    email: Optional[str] = None
+    affiliation: Optional[str] = None
+    location: Optional[Location] = None
+    orcid: Optional[ORCID] = None

@@ -245,8 +245,17 @@ def get_my_keywords(tasks: BackgroundTasks,
         return {"status": "ok", "keywords": keywords}
 
     tasks.add_task(_refresh_in_background, user_id, token, None)
-    status = "pending" if last_processed_at(profile) is None else "no_keywords"
+    if last_processed_at(profile) is None:
+        status = "pending" 
+    else:
+        status = "no_keywords"
     return {"status": status, "keywords": []}
+
+
+# USER PROFILE MANIPULATION
+
+
+
 
 #=========================================
 # /{user_id} endpoint
