@@ -185,6 +185,73 @@ async def api_home():
     return {"message": "User Profiler API V1 is running"}
 
 
+
+#=========================================
+# /me endpoint
+#=========================================
+
+
+# USER CREATION
+
+# ensures the same user is not created twice by concurrent requests
+_create_lock = threading.Lock()
+
+# new endpoint for the UI
+@protected.post("/user/me", status_code=201, summary="Create the token's own user, or complete it if it already exists")
+def create_me(response: Response, payload: UserEdit | None = None,
+              claims: dict = Depends(security.require_app_scope)):
+    '''
+    The user ID is the token's sub
+        - new user: name, surname and email from the token, the body (e.g. {"affiliation": "..."})
+          adds the missing fields or overrides the token's ones --> 201
+        - existing user (e.g. already created by a QR notification): the body is applied
+          as a PATCH --> 200
+    '''
+    
+    # get user id from the token
+    #   + user info
+    user_id = claims["sub"]
+    body = payload.model_dump(exclude_none=True) if payload else {}
+    
+    with _create_lock:
+        current = load_user_profile(user_id)
+        if current is None:
+            return _create(user_id, UserCreate(**(_user_from_token(claims).model_dump() | body)))
+        response.status_code = 200
+        return _apply_edit(current, UserEdit(**body)) if body else UserProfile(**current)
+
+
+# USER KEYWORDS
+
+# exposes the user's keywords to the UI
+@protected.get("/user/me/keywords", summary="Keywords of the token's own user (UI profile page)")
+def get_my_keywords(tasks: BackgroundTasks,
+                    token: str = Depends(oauth2_scheme),
+                    claims: dict = Depends(security.require_app_scope)):
+    '''
+    Keywords stored in grafeo, with weight and "expired" flag
+        - "ok": keywords available
+        - "pending": none yet, a refresh from the DMM has been started -> reload later
+        - "no_queries": the UP has never seen this user
+        - "no_keywords": processed, but no keywords came out
+    '''
+    user_id = claims["sub"]
+    profile = load_user_profile(user_id)
+    if profile is None:
+        return {"status": "no_queries", "keywords": []}
+
+    keywords = weighted_keywords(profile)
+    if keywords:
+        return {"status": "ok", "keywords": keywords}
+
+    tasks.add_task(_refresh_in_background, user_id, token, None)
+    status = "pending" if last_processed_at(profile) is None else "no_keywords"
+    return {"status": status, "keywords": []}
+
+#=========================================
+# /{user_id} endpoint
+#=========================================
+
 @protected.get("/users", summary="List all users")
 def get_users():
     users = list_users()
@@ -218,35 +285,6 @@ def append_user_keywords(user_id: str, payload: KeywordsAppend):
 
 #==============================
 # User creation and deletion
-
-# ensures the same user is not created twice by concurrent requests
-_create_lock = threading.Lock()
-
-
-# new endpoint for the UI
-@protected.post("/user/me", status_code=201, summary="Create the token's own user, or complete it if it already exists")
-def create_me(response: Response, payload: UserEdit | None = None,
-              claims: dict = Depends(security.require_app_scope)):
-    '''
-    The user ID is the token's sub
-        - new user: name, surname and email from the token, the body (e.g. {"affiliation": "..."})
-          adds the missing fields or overrides the token's ones --> 201
-        - existing user (e.g. already created by a QR notification): the body is applied
-          as a PATCH --> 200
-    '''
-    
-    # get user id from the token
-    #   + user info
-    user_id = claims["sub"]
-    body = payload.model_dump(exclude_none=True) if payload else {}
-    
-    with _create_lock:
-        current = load_user_profile(user_id)
-        if current is None:
-            return _create(user_id, UserCreate(**(_user_from_token(claims).model_dump() | body)))
-        response.status_code = 200
-        return _apply_edit(current, UserEdit(**body)) if body else UserProfile(**current)
-
 
 
 # kept for testing
@@ -463,7 +501,7 @@ async def refresh_user_keywords(user_id: str, token: str, query: str | None = No
 # Notify a new query
 
 # to track the refresh process 
-async def _refresh_in_background(user_id: str, token: str, query: str) -> None:
+async def _refresh_in_background(user_id: str, token: str, query: str | None) -> None:
     '''
     Runs the refresh after the 202 
         --> logs its outcome
