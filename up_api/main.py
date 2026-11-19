@@ -10,7 +10,15 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, BackgroundTasks,
 from fastapi.responses import RedirectResponse
 
 from .resources import security
-from .resources.data_models import DMMQuery, KeywordsAppend, QueryEvent, UserCreate, UserEdit, UserProfile
+from .resources.data_models import (
+    DMMQuery,
+    KeywordsAppend,
+    QueryEvent,
+    UserCreate,
+    UserEdit,
+    UserProfile,
+    UserMe
+)
 from .resources.graph_helpers import (
     init_db,
     close_db,
@@ -255,6 +263,21 @@ def get_my_keywords(tasks: BackgroundTasks,
 # USER PROFILE MANIPULATION
 
 
+@protected.get("/user/me", summary="Retrieve the token's own user")
+def get_me(claims: dict = Depends(security.require_app_scope)):
+    return _require_user(claims['sub'])
+
+
+@protected.patch("/user/me", summary="Edit the token's own user")
+def edit_me(payload: UserMe, claims: dict = Depends(security.require_app_scope)):
+    return _apply_edit(_require_user(claims['sub']), UserEdit(**payload.model_dump(exclude_unset=True)))
+
+
+@protected.delete("/user/me", summary="Delete the token's own user")
+def delete_me(claims: dict = Depends(security.require_app_scope)):
+    _require_user(claims['sub'])
+    delete_user_subgraph(claims['sub'])
+    return {"message": f"User '{claims['sub']}' deleted."}
 
 
 #=========================================
