@@ -5,13 +5,9 @@ User's query history and keywords:
     - refresh when the QR notifies a new quer 
     - and LLM keyword generation.
 '''
-import asyncio
+import asyncio, logging, json, os, httpx
 from collections import defaultdict
-import json
-import logging
-import os
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 
@@ -42,7 +38,7 @@ router = APIRouter()
 DMM_QUERY_ATTEMPTS = int(os.getenv("DMM_QUERY_ATTEMPTS", "3"))
 DMM_QUERY_RETRY_SECONDS = float(os.getenv("DMM_QUERY_RETRY_SECONDS", "2"))
 
-# Data managment model url
+
 DMM_URL = os.getenv("DMM_URL", "https://datagems-dev.scayle.es/dmm").rstrip("/")
 
 

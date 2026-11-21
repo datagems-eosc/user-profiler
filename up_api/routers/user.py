@@ -2,8 +2,7 @@
 User management: internal helpers and endpoints to create, read, edit and delete users.
 Covers both the token's own user (/user/me) and users by ID (/user/{user_id}).
 '''
-import logging
-import threading
+import logging, threading
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
