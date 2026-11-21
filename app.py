@@ -1,14 +1,10 @@
-import base64
-import json
-import os
-import time
-import uuid
+import base64, uuid, os, json, time, html
 from datetime import date, datetime, timedelta, timezone
 
 import streamlit as st
 import requests
 from requests.exceptions import ConnectionError, Timeout
-
+    
 INACTIVITY_MINUTES = 5
 
 _API_OPTIONS = {
@@ -45,14 +41,21 @@ DMM_MODE = _api_choice == "Local + DMM"
 HEADERS = {"Authorization": f"Bearer {_token}"} if _token else {}
 
 
-def _token_problem(token: str) -> str | None:
-    """Missing / malformed / expired token (claims decoded for display only, the API verifies it)."""
-    if not token:
-        return "No token: the API will answer 401."
+def _claims(token: str) -> dict:
+    """Token claims, decoded for display only (the API verifies the signature). {} if malformed."""
     try:
         payload = token.split(".")[1]
-        exp = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"]
-    except (IndexError, ValueError, KeyError, TypeError):
+        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except (IndexError, ValueError, TypeError):
+        return {}
+
+
+def _token_problem(token: str) -> str | None:
+    """Missing / malformed / expired token."""
+    if not token:
+        return "No token: the API will answer 401."
+    exp = _claims(token).get("exp")
+    if exp is None:
         return "This doesn't look like a Keycloak token."
     left = int(exp - time.time())
     return f"Token expired {-left // 60} min ago: get a new one." if left <= 0 else None
@@ -1014,11 +1017,206 @@ def _dmm_user_queries():
     )
 
 
+
+# ---------------------------------------------------------------------------
+# UI demo page  (DataGEMS "Settings" screen, only the /user/me endpoints)
+# ---------------------------------------------------------------------------
+
+_KW_STATUS = {
+    "pending": "No keywords yet: the UP has started a refresh from the user's DMM queries. "
+               "Press **Reload** in a few seconds.",
+    "no_keywords": "The user's queries were processed but no keywords came out "
+                   "(a new refresh has been started).",
+    "no_queries": "The UP has never seen this user.",
+}
+
+
+def _api_error(e: requests.HTTPError) -> str:
+    try:
+        detail = e.response.json().get("detail", e.response.text)
+    except ValueError:
+        detail = e.response.text[:300]
+    return f"{e.response.status_code}: {detail}"
+
+
+
+def _ro(col, label: str, value) -> None:
+    '''
+    Read-only field, styled like the UI's disabled inputs.
+    '''
+    col.markdown(
+        f'<div style="font-size:0.85rem;opacity:0.65">{html.escape(label)}</div>'
+        f'<div style="background:rgba(128,128,128,0.12);border:1px solid rgba(128,128,128,0.35);'
+        f'border-radius:999px;padding:6px 14px;margin-bottom:8px">{html.escape(str(value or "—"))}</div>',
+        unsafe_allow_html=True,
+    )
+
+@st.dialog("Edit profile")
+def _edit_me_dialog(me: dict):
+    old_orcid = (me.get("orcid") or {}).get("id", "")
+    with st.form("demo_edit_me"):
+        c1, c2 = st.columns(2)
+        name = c1.text_input("Name *", me["name"])
+        surname = c2.text_input("Surname *", me["surname"])
+        email = st.text_input("Email *", me["email"])
+        affiliation = st.text_input("Affiliation *", me["affiliation"])
+        orcid_id = st.text_input("ORCID iD", old_orcid,
+                                 help="Leave empty to remove it. A new iD is fetched from ORCID on save.")
+        if not st.form_submit_button("Save", type="primary"):
+            return
+
+    fields = {"name": name.strip(), "surname": surname.strip(),
+              "email": email.strip(), "affiliation": affiliation.strip()}
+    if not all(fields.values()):
+        st.warning("Please fill in all required fields (marked with *).")
+        return
+
+    # PATCH only what changed
+    payload = {k: v for k, v in fields.items() if v != me.get(k)}
+    orcid_id = orcid_id.strip()
+    if orcid_id != old_orcid:
+        if not orcid_id:
+            payload["orcid"] = None
+        else:
+            try:
+                with st.spinner("Fetching from ORCID..."):
+                    payload["orcid"] = _parse_orcid_raw(_get(f"/orcid/{orcid_id}", timeout=15), orcid_id)
+            except requests.HTTPError as e:
+                st.error(f"ORCID {_api_error(e)}")
+                return
+            except Exception as e:
+                st.error(f"Could not reach ORCID: {e}")
+                return
+    if not payload:
+        st.info("Nothing changed.")
+        return
+
+    try:
+        _patch("/user/me", payload)
+    except requests.HTTPError as e:
+        st.error(f"Could not save: {_api_error(e)}")
+        return
+    except Exception as e:
+        st.error(f"Could not save: {e}")
+        return
+    st.session_state._demo_saved = "Profile updated"
+    st.rerun()  # closes the dialog and reloads the profile
+
+
+def page_ui_demo():
+    st.title("Settings")
+    st.caption("Demo for the DataGEMS UI developers. It only calls the endpoints made for the UI "
+               "(`/user/me...`), with the sidebar token: the user is the token's `sub`, "
+               "on whichever API is selected in the sidebar.")
+
+    if msg := st.session_state.pop("_demo_saved", None):
+        st.toast(msg)
+
+    sub = _claims(_token).get("sub")
+    if not sub:
+        st.info("Paste a valid Keycloak token in the sidebar.")
+        return
+
+    try:
+        me = _get("/user/me")
+    except requests.HTTPError as e:
+        if e.response.status_code == 404 and "'me'" in e.response.text:
+            # Old API: /user/me falls into /user/{user_id}
+            st.error("This API has no `/user/me` endpoints yet: deploy the latest up_api.")
+        elif e.response.status_code == 404:
+            st.info(f"The UP has no profile for `{sub}` yet (it is created at the first query, "
+                    "or with `POST /user/me`).")
+            if st.button("Create my profile", type="primary"):
+                try:
+                    _post("/user/me", {})
+                    st.rerun()
+                except requests.HTTPError as e2:
+                    st.error(f"Could not create the profile: {_api_error(e2)}")
+        else:
+            st.error(f"Could not load the profile: {_api_error(e)}")
+        return
+    except Exception as e:
+        st.error(f"Could not load the profile: {e}")
+        return
+
+    # -- Basic info --
+    head, edit = st.columns([5, 1])
+    head.subheader("Basic Info")
+    if edit.button("Edit profile", key="demo_edit_btn", use_container_width=True):
+        _edit_me_dialog(me)
+    st.divider()
+
+    label, content = st.columns([1, 3])
+    label.markdown("**User Info**  \nYour account information")
+    initials = html.escape((me["name"][:1] + me["surname"][:1]).upper())
+    content.markdown(
+        f'<div style="display:flex;align-items:center;gap:14px">'
+        f'<div style="width:48px;height:48px;border-radius:50%;background:#e2e8f0;color:#334155;'
+        f'display:flex;align-items:center;justify-content:center;font-weight:600">{initials}</div>'
+        f'<div><b>{html.escape(me["name"])} {html.escape(me["surname"])}</b><br>'
+        f'<span style="color:#64748b">{html.escape(me["email"])}</span></div></div>',
+        unsafe_allow_html=True,
+    )
+    st.divider()
+
+    label, c1, c2 = st.columns([1, 1.5, 1.5])
+    label.markdown("**Account name**  \nYour account information")
+    _ro(c1, "Name", me["name"])
+    _ro(c2, "Surname", me["surname"])
+    st.divider()
+
+    label, c1, c2 = st.columns([1, 1.5, 1.5])
+    label.markdown("**Research profile**  \nAffiliation and ORCID")
+    _ro(c1, "Affiliation", me["affiliation"])
+    orcid = me.get("orcid")
+    _ro(c2, "ORCID iD", orcid and orcid["id"])
+    if orcid and orcid.get("publications"):
+        c2.caption(f"{len(orcid['publications'])} publications imported from ORCID")
+    st.divider()
+
+    # -- Keywords --
+    cache = st.session_state.setdefault("_demo_kw", {})
+    ck = (API_BASE, sub)
+    head, btn = st.columns([5, 1])
+    head.subheader("Interest keywords")
+    if btn.button("Reload" if ck in cache else "Show keywords", key="demo_kw_btn", use_container_width=True):
+        try:
+            cache[ck] = _get("/user/me/keywords")
+        except requests.HTTPError as e:
+            st.error(f"Could not load keywords: {_api_error(e)}")
+        except Exception as e:
+            st.error(f"Could not load keywords: {e}")
+
+    data = cache.get(ck)
+    if data is None:
+        st.caption("Latest keywords saved in the graph. If there are none yet, the call also starts "
+                   "a refresh from the DMM.")
+    elif data["status"] == "ok":
+        _render_keyword_tags(data["keywords"])
+        st.caption("Strongest first. The weight halves every 30 days since the keyword was last seen; "
+                   "struck-through ones have expired. ORCID keywords have a fixed weight.")
+    else:
+        st.info(_KW_STATUS.get(data["status"], data["status"]))
+
+    # -- For the developers --
+    with st.expander("Endpoints used by this page"):
+        st.markdown(
+            "| Action | Call |\n|---|---|\n"
+            "| Load the profile | `GET /user/me` (no sessions, no keywords) |\n"
+            "| First access | `POST /user/me` (body optional, e.g. `{\"affiliation\": \"...\"}`) |\n"
+            "| Save edits | `PATCH /user/me` (only the changed fields; `orcid: null` removes it) |\n"
+            "| Import ORCID | `GET /orcid/{id}`, then sent as `orcid` in the PATCH |\n"
+            "| Keywords | `GET /user/me/keywords` → `status`: `ok` / `pending` / `no_keywords` / `no_queries` |"
+        )
+    with st.expander("Raw responses"):
+        st.json({"GET /user/me": me, "GET /user/me/keywords": data}, expanded=False)
+
+
 # ---------------------------------------------------------------------------
 # Top-level tabs
 # ---------------------------------------------------------------------------
 
-tab_users, tab_chat, tab_dmm = st.tabs(["Users", "Chat", "DMM queries"])
+tab_users, tab_chat, tab_dmm, tab_demo = st.tabs(["Users", "Chat", "DMM queries", "UI demo"])
 
 with tab_users:
     page = st.session_state.page
@@ -1036,3 +1234,6 @@ with tab_chat:
 
 with tab_dmm:
     page_dmm_queries()
+
+with tab_demo:
+    page_ui_demo()
