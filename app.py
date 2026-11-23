@@ -1103,6 +1103,29 @@ def _edit_me_dialog(me: dict):
     st.rerun()  # closes the dialog and reloads the profile
 
 
+@st.dialog("Interest keywords", width="large")
+def _keywords_dialog():
+    # Runs again on every interaction inside the dialog: always reads the latest keywords from grafeo
+    try:
+        with st.spinner("Loading keywords..."):
+            data = _get("/user/me/keywords")
+    except requests.HTTPError as e:
+        st.error(f"Could not load keywords: {_api_error(e)}")
+        return
+    except Exception as e:
+        st.error(f"Could not load keywords: {e}")
+        return
+
+    if data["status"] == "ok":
+        _render_keyword_tags(data["keywords"])
+        st.caption("Strongest first. The weight halves every 30 days since the keyword was last seen; "
+                   "struck-through ones have expired. ORCID keywords have a fixed weight.")
+    else:
+        st.info(_KW_STATUS.get(data["status"], data["status"]))
+
+    st.button("Reload", key="demo_kw_reload")  # just triggers a rerun, i.e. a new GET
+
+
 def page_ui_demo():
     st.title("Settings")
     st.caption("Demo for the DataGEMS UI developers. It only calls the endpoints made for the UI "
@@ -1171,36 +1194,12 @@ def page_ui_demo():
         c2.caption(f"{len(orcid['publications'])} publications imported from ORCID")
     st.divider()
 
-    # -- Keywords --
-    cache = st.session_state.setdefault("_demo_kw", {})
-    ck = (API_BASE, sub)
-    st.subheader("Interest keywords")
-    kw_box = st.container()  # filled after the buttons, so a click shows the new keywords right away
-
-    st.divider()
+    # -- Actions --
     b1, b2, _ = st.columns([1, 1, 3])
     if b1.button("Edit profile", key="demo_edit_btn", type="primary", use_container_width=True):
         _edit_me_dialog(me)
-    if b2.button("Reload keywords" if ck in cache else "Show keywords", key="demo_kw_btn",
-                 use_container_width=True):
-        try:
-            cache[ck] = _get("/user/me/keywords")
-        except requests.HTTPError as e:
-            kw_box.error(f"Could not load keywords: {_api_error(e)}")
-        except Exception as e:
-            kw_box.error(f"Could not load keywords: {e}")
-
-    with kw_box:
-        data = cache.get(ck)
-        if data is None:
-            st.caption("Latest keywords saved in the graph. If there are none yet, the call also starts "
-                       "a refresh from the DMM.")
-        elif data["status"] == "ok":
-            _render_keyword_tags(data["keywords"])
-            st.caption("Strongest first. The weight halves every 30 days since the keyword was last seen; "
-                       "struck-through ones have expired. ORCID keywords have a fixed weight.")
-        else:
-            st.info(_KW_STATUS.get(data["status"], data["status"]))
+    if b2.button("Show keywords", key="demo_kw_btn", use_container_width=True):
+        _keywords_dialog()
 
 
 # ---------------------------------------------------------------------------
