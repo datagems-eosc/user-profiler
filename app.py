@@ -1140,10 +1140,7 @@ def page_ui_demo():
         return
 
     # -- Basic info --
-    head, edit = st.columns([5, 1])
-    head.subheader("Basic Info")
-    if edit.button("Edit profile", key="demo_edit_btn", use_container_width=True):
-        _edit_me_dialog(me)
+    st.subheader("Basic Info")
     st.divider()
 
     label, content = st.columns([1, 3])
@@ -1177,39 +1174,33 @@ def page_ui_demo():
     # -- Keywords --
     cache = st.session_state.setdefault("_demo_kw", {})
     ck = (API_BASE, sub)
-    head, btn = st.columns([5, 1])
-    head.subheader("Interest keywords")
-    if btn.button("Reload" if ck in cache else "Show keywords", key="demo_kw_btn", use_container_width=True):
+    st.subheader("Interest keywords")
+    kw_box = st.container()  # filled after the buttons, so a click shows the new keywords right away
+
+    st.divider()
+    b1, b2, _ = st.columns([1, 1, 3])
+    if b1.button("Edit profile", key="demo_edit_btn", type="primary", use_container_width=True):
+        _edit_me_dialog(me)
+    if b2.button("Reload keywords" if ck in cache else "Show keywords", key="demo_kw_btn",
+                 use_container_width=True):
         try:
             cache[ck] = _get("/user/me/keywords")
         except requests.HTTPError as e:
-            st.error(f"Could not load keywords: {_api_error(e)}")
+            kw_box.error(f"Could not load keywords: {_api_error(e)}")
         except Exception as e:
-            st.error(f"Could not load keywords: {e}")
+            kw_box.error(f"Could not load keywords: {e}")
 
-    data = cache.get(ck)
-    if data is None:
-        st.caption("Latest keywords saved in the graph. If there are none yet, the call also starts "
-                   "a refresh from the DMM.")
-    elif data["status"] == "ok":
-        _render_keyword_tags(data["keywords"])
-        st.caption("Strongest first. The weight halves every 30 days since the keyword was last seen; "
-                   "struck-through ones have expired. ORCID keywords have a fixed weight.")
-    else:
-        st.info(_KW_STATUS.get(data["status"], data["status"]))
-
-    # -- For the developers --
-    with st.expander("Endpoints used by this page"):
-        st.markdown(
-            "| Action | Call |\n|---|---|\n"
-            "| Load the profile | `GET /user/me` (no sessions, no keywords) |\n"
-            "| First access | `POST /user/me` (body optional, e.g. `{\"affiliation\": \"...\"}`) |\n"
-            "| Save edits | `PATCH /user/me` (only the changed fields; `orcid: null` removes it) |\n"
-            "| Import ORCID | `GET /orcid/{id}`, then sent as `orcid` in the PATCH |\n"
-            "| Keywords | `GET /user/me/keywords` → `status`: `ok` / `pending` / `no_keywords` / `no_queries` |"
-        )
-    with st.expander("Raw responses"):
-        st.json({"GET /user/me": me, "GET /user/me/keywords": data}, expanded=False)
+    with kw_box:
+        data = cache.get(ck)
+        if data is None:
+            st.caption("Latest keywords saved in the graph. If there are none yet, the call also starts "
+                       "a refresh from the DMM.")
+        elif data["status"] == "ok":
+            _render_keyword_tags(data["keywords"])
+            st.caption("Strongest first. The weight halves every 30 days since the keyword was last seen; "
+                       "struck-through ones have expired. ORCID keywords have a fixed weight.")
+        else:
+            st.info(_KW_STATUS.get(data["status"], data["status"]))
 
 
 # ---------------------------------------------------------------------------
