@@ -1,6 +1,7 @@
 """
-UI demo tab: mock of the DataGEMS "Settings" screen for the UI developers.
-Only calls the endpoints made for the UI (/user/me...): the user is the token's sub.
+UI demo tab: 
+    - mock of the DataGEMS "Settings" screen for the UI developers
+        --> only calls the endpoints made for the UI
 """
 import html
 

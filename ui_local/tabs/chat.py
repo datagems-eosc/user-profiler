@@ -1,6 +1,9 @@
 """
-Chat tab: simulates a user typing queries, stored as sessions in grafeo.
-A session is closed after INACTIVITY_MINUTES without queries.
+Chat tab: 
+    - simulates a user typing queries
+    - stored as sessions in grafeo
+
+--> A session is closed after INACTIVITY_MINUTES without queries
 """
 import uuid
 from datetime import datetime, timedelta, timezone

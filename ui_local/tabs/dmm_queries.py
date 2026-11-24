@@ -1,6 +1,8 @@
 """
-DMM queries tab: the queries of one user (via the API's queries_test endpoint)
-and the most recent queries by any user (read straight from the DMM).
+DMM queries tab: 
+    - the queries of one user
+    - the most recent queries by any user 
+        --> From DMM
 """
 import os
 import uuid

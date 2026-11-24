@@ -1,6 +1,8 @@
 """
-DMM widgets used inside the Users tab (user view and list): the user's DMM queries,
-the keyword refresh status and, in "Local + DMM" mode, the 10-second live refresh.
+DMM widgets used inside the Users tab: 
+    - the user's DMM queries,
+    - the keyword refresh status
+    - in "Local + DMM" mode: the 10-second live refresh
 """
 from datetime import datetime
 
@@ -128,11 +130,15 @@ def render_refresh_status(user_id: str) -> None:
         st.caption(f"New: {', '.join(s['added']) or '—'}  |  Refreshed: {', '.join(s['refreshed']) or '—'}")
 
 
+
 @st.fragment(run_every="10s")
 def live_dmm(user_id: str, saved: set):
     '''
     "Local + DMM" mode only: refresh every 10 s, then show the DMM queries and the outcome
     '''
+    if problem := api.token_problem(api.token()):
+        st.warning(f"Live refresh paused: {problem}")
+        return
     if st.session_state.pop("_skip_refresh", False):
         pass  # full rerun just after an update: keep the "ok" status on screen
     else:

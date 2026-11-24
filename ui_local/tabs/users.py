@@ -1,6 +1,10 @@
 """
-Users tab: list, view, create and edit users through the /user/{user_id} endpoints.
-The sub-page shown is st.session_state.page ("list" | "view" | "create" | "edit").
+Users tab: 
+    - list
+    - view
+    - create and edit users
+    - keywords
+        --> Those stored in grafeo
 """
 import uuid
 from datetime import datetime

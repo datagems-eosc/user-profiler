@@ -1,7 +1,7 @@
 """
-HTTP client for the User Profiler API, configured from the sidebar widgets
-(st.session_state["api_choice"] and st.session_state["token"]).
-Read at call time, so every module sees the current sidebar values.
+HTTP client for the User Profiler API
+    - read at call time
+        --> so every module sees the current sidebar values
 """
 import base64
 import json
