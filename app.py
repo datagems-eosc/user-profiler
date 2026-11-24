@@ -1,6 +1,5 @@
 """
-User Profiler test UI: sidebar (API endpoint + token) and one tab per tested feature.
-Each tab lives in ui/tabs/<name>.py and exposes render().
+User Profiler test UI
 """
 import os
 
@@ -40,6 +39,7 @@ except (requests.ConnectionError, requests.Timeout):
 
 # Adding a tab = one module in ui/tabs + one line here
 TABS = {"Users": users, "Chat": chat, "DMM queries": dmm_queries, "UI demo": ui_demo}
-for tab, module in zip(st.tabs(list(TABS)), TABS.values()):
-    with tab:
-        module.render()
+
+# Unlike st.tabs, only the selected tab runs (no API calls for the hidden ones)
+selected = st.segmented_control("Tab", list(TABS), default="Users", key="tab", label_visibility="collapsed")
+TABS[selected or "Users"].render()  # None if the active option is clicked again
