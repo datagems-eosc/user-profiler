@@ -39,25 +39,17 @@ Note that the user endpoints are served at the root of the service (e.g. `/users
 | POST | `/user/{user_id}/refresh-keyword_test` | Runs a keyword refresh and waits for its outcome |
 | GET | `/user/{user_id}/queries_test` | The user's queries as read from the DMM |
 
-All endpoints under `/user/{user_id}` answer `404 Not Found` with `{"detail": "No such user: '...'"}` if the user does not exist. The `/user/me` endpoints do the same when the token's subject has no profile yet, except `POST /user/me`, which creates it, and `GET /user/me/keywords`, which answers with a status.
+All endpoints under `/user/{user_id}` answer `404 Not Found` with `{"detail": "No such user: '...'"}` if the user does not exist. The `/user/me` endpoints do the same when the token's subject has no profile yet, except `POST /user/me`, which creates it, and `GET /user/me/keywords`, which answers with the status `no_profile`.
 
 ## Token's own user
 
 These endpoints are meant for the DataGEMS user interface, e.g. a profile or settings page. They take no user id: the user is the subject (*sub* claim) of the access token, which is also the id the DMM logs the user's queries under. Users do not need to create their profile: the service creates it the first time it is notified of one of their queries (see [Query notifications](#query-notifications)). `POST /user/me` is there for users who open their profile before running any query.
 
-### Create or complete
+The response schemas of these endpoints are in the [OpenAPI Reference](openapi.md): `UserMeOut` for the profile, `MyKeywords` for the keywords.
 
-`POST /user/me` takes the user's name, surname and email from the token (`given_name` or `preferred_username`, `family_name`, `email`). The affiliation is set to `unknown`. The body is optional: its fields complete or override the ones from the token, and it accepts the same fields as `PATCH /user/{user_id}`:
+### The profile object
 
-```json
-{ "affiliation": "University of Verona" }
-```
-
-If the user does not exist yet, the service answers `201 Created` with the full profile. If it already exists (for example, created by a query notification), the body is applied as an edit and the service answers `200 OK` with the updated profile.
-
-### Retrieve
-
-`GET /user/me` returns the profile without `keywords` and `sessions`: the keywords have their own endpoint, and the user interface already displays the queries.
+`POST`, `GET` and `PATCH /user/me` all answer with the same object: the profile without `keywords` and `sessions`. The keywords have their own endpoint, and the user interface already displays the queries.
 
 ```json
 {
@@ -67,14 +59,44 @@ If the user does not exist yet, the service answers `201 Created` with the full 
   "dateOfBirth": null,
   "email": "alice.rossi@example.com",
   "affiliation": "University of Verona",
-  "location": null,
-  "orcid": null
+  "location": { "city": "Verona", "country": "Italy" },
+  "orcid": {
+    "id": "0000-0002-1825-0097",
+    "keywords": [{ "value": "machine learning", "addedAt": null, "lastSeenAt": null }],
+    "publications": [{
+      "title": "Graph-Based User Profiling",
+      "doi": "10.1000/xyz123",
+      "journal": "Data Science Journal",
+      "year": 2023,
+      "authors": [{ "fullName": "Alice Rossi" }]
+    }]
+  }
 }
 ```
 
+`name`, `surname`, `email` and `affiliation` are always present. `dateOfBirth`, `location` and `orcid` can be `null`.
+
+### Create or complete
+
+`POST /user/me` takes the user's name, surname and email from the token (`given_name` or `preferred_username`, `family_name`, `email`). The affiliation is set to `unknown`. The body is optional: its fields complete or override the ones from the token. It accepts the same fields as `PATCH /user/me`:
+
+```json
+{ "affiliation": "University of Verona" }
+```
+
+If the user does not exist yet, the service answers `201 Created` with the profile object. If it already exists (for example, created by a query notification), the body is applied as an edit and the service answers `200 OK` with the updated profile. It never creates the same user twice, so the interface can call it every time the profile page opens, instead of calling `GET` and handling the `404`.
+
+### Retrieve
+
+`GET /user/me` returns the profile object, or `404` if the user has no profile yet.
+
 ### Edit
 
-`PATCH /user/me` changes only the fields present in the body and returns the full updated profile. The editable fields are `name`, `surname`, `dateOfBirth`, `email`, `affiliation`, `location` and `orcid`. Keywords and sessions cannot be changed through this endpoint: they are ignored if sent. As with `PATCH /user/{user_id}`, `location` and `orcid` are replaced as a whole.
+`PATCH /user/me` changes only the fields present in the body and returns the updated profile object. The editable fields are `name`, `surname`, `dateOfBirth`, `email`, `affiliation`, `location` and `orcid`. Keywords and sessions cannot be changed through this endpoint: they are ignored if sent. As with `PATCH /user/{user_id}`, `location` and `orcid` are replaced as a whole.
+
+* A field left out keeps its value.
+* `null` clears `dateOfBirth`, `location` or `orcid`.
+* `name`, `surname`, `email` and `affiliation` cannot be cleared: `null` or an empty string answers `422`. Surrounding spaces are trimmed.
 
 ```json
 { "orcid": { "id": "0000-0002-1825-0097", "keywords": [], "publications": [] } }
@@ -92,21 +114,34 @@ If the user does not exist yet, the service answers `201 Created` with the full 
 
 `GET /user/me/keywords` returns the same keyword list as `GET /user/{user_id}/keywords` (see [List keywords with weights](#list-keywords-with-weights)), with a `status` telling the interface what to show:
 
-| `status` | Meaning |
-|---|---|
-| `ok` | The keywords are in `keywords` |
-| `pending` | The user has no keywords yet and their queries were never processed. A refresh from the DMM has been started: reload in a few seconds |
-| `no_keywords` | The user's queries were processed, but no keywords came out. A new refresh has been started |
-| `no_queries` | The service has never seen this user |
+| `status` | Meaning | Suggested display |
+|---|---|---|
+| `ok` | The keywords are in `keywords` | The keywords |
+| `pending` | The user has no keywords yet, and a refresh from the DMM is running | "Your interests are being computed", and ask again after a few seconds |
+| `no_queries` | The DMM has no queries for the user yet | "Your interests will appear after your first queries" |
+| `no_keywords` | The user's queries were processed, but no keywords came out | "No interests found yet" |
+| `error` | The last refresh failed (DMM or LLM unreachable). It is retried later | "Your interests cannot be updated right now" |
+| `no_profile` | The user has no profile yet | As for `no_queries`, or create the profile with `POST /user/me` |
+
+`keywords` is empty for every status but `ok`. Asking again is cheap: for a user without keywords, the service reads the DMM again at most once a minute (`KEYWORD_REFRESH_COOLDOWN_SECONDS`), whatever the number of requests. After that, `pending` lasts a few seconds, while the DMM and the LLM answer.
 
 ```json
 {
   "status": "ok",
   "keywords": [
-    { "value": "weather", "weight": 1.0, "source": "session", "lastSeenAt": "2026-11-27T13:02:59+00:00", "expired": false }
+    { "value": "weather", "weight": 1.0, "source": "session", "lastSeenAt": "2026-11-27T13:02:59Z", "expired": false },
+    { "value": "machine learning", "weight": 0.5, "source": "orcid", "lastSeenAt": null, "expired": false }
   ]
 }
 ```
+
+Keywords are sorted strongest first. Each one has:
+
+* `value`: the keyword
+* `weight`: between 0 and 1. A session keyword weighs 1.0 when just seen, and its weight halves every 30 days since. ORCID keywords have a constant weight of 0.5
+* `source`: `session` (extracted from the user's queries) or `orcid` (from the user's ORCID record)
+* `lastSeenAt`: when a session keyword was last extracted, in UTC. `null` for ORCID keywords
+* `expired`: `true` when the weight is below 0.1 (about 100 days without being seen). Expired keywords are no longer used by other services, and could be shown greyed out or hidden
 
 ## Users
 
@@ -265,9 +300,9 @@ The refresh reads the user's new queries from the DMM, asks the LLM for their ke
 ```json
 {
   "keywords": [
-    { "value": "GNN", "weight": 0.871, "source": "session", "lastSeenAt": "2026-09-25T10:00:00+00:00", "expired": false },
+    { "value": "GNN", "weight": 0.871, "source": "session", "lastSeenAt": "2026-09-25T10:00:00Z", "expired": false },
     { "value": "machine learning", "weight": 0.5, "source": "orcid", "lastSeenAt": null, "expired": false },
-    { "value": "graphs", "weight": 0.06, "source": "session", "lastSeenAt": "2026-05-02T10:00:00+00:00", "expired": true }
+    { "value": "graphs", "weight": 0.06, "source": "session", "lastSeenAt": "2026-05-02T10:00:00Z", "expired": true }
   ]
 }
 ```

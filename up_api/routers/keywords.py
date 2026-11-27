@@ -5,14 +5,15 @@ User's query history and keywords:
     - refresh when the QR notifies a new quer 
     - and LLM keyword generation.
 '''
-import asyncio, logging, json, os, httpx
+import asyncio, logging, json, os, threading, time, httpx
 from collections import defaultdict
+from dataclasses import dataclass
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 
 from ..resources import security
-from ..resources.data_models import DMMQuery, QueryEvent
+from ..resources.data_models import DMMQuery, MyKeywords, QueryEvent
 from ..resources.graph_helpers import load_user_profile
 from ..resources.LLM_helpers import generate_keywords_from_session
 from ..resources.profile_helpers import (
@@ -40,6 +41,10 @@ DMM_QUERY_RETRY_SECONDS = float(os.getenv("DMM_QUERY_RETRY_SECONDS", "2"))
 
 
 DMM_URL = os.getenv("DMM_URL", "https://datagems-dev.scayle.es/dmm").rstrip("/")
+
+# GET /user/me/keywords starts a refresh for a user without keywords at most once
+# every KEYWORD_REFRESH_COOLDOWN_SECONDS, so a UI that polls does not flood the DMM
+KEYWORD_REFRESH_COOLDOWN_SECONDS = float(os.getenv("KEYWORD_REFRESH_COOLDOWN_SECONDS", "60"))
 
 
 # =================================
@@ -113,6 +118,37 @@ async def fetch_user_queries(token: str, user_id: str) -> list[DMMQuery]:
 # creating a lock for each user to avoid concurrent refreshes
 _refresh_locks = defaultdict(asyncio.Lock)
 
+
+@dataclass
+class _RefreshState:
+    '''
+    What the UP knows about a user's refreshes (in memory: reset at restart)
+    '''
+    scheduled: int = 0                 # refreshes scheduled or running
+    finished_at: float | None = None   # time.monotonic() of the last finished refresh
+    failed: bool = False               # the last finished refresh failed (DMM or LLM)
+
+
+_refresh_state: dict[str, _RefreshState] = defaultdict(_RefreshState)
+# the state is read by the sync endpoints (threadpool) and written by the background tasks (event loop)
+_state_lock = threading.Lock()
+
+
+def _record_outcome(user_id: str, failed: bool) -> None:
+    with _state_lock:
+        state = _refresh_state[user_id]
+        state.finished_at = time.monotonic()
+        state.failed = failed
+
+
+def _schedule_refresh(tasks: BackgroundTasks, user_id: str, token: str, query: str | None) -> None:
+    '''
+    Runs a refresh after the response, and counts it as pending until it ends
+    '''
+    with _state_lock:
+        _refresh_state[user_id].scheduled += 1
+    tasks.add_task(_refresh_in_background, user_id, token, query)
+
 def _norm(text: str) -> str:
     '''collapses whitespace, so the notified text and the DMM one compare equal'''
     return " ".join(text.split())
@@ -160,6 +196,21 @@ async def _fetch_new_queries(user_id: str, token: str, last, query: str | None) 
 
 
 async def refresh_user_keywords(user_id: str, token: str, query: str | None = None) -> dict:
+    '''
+    Refreshes the user's keywords (see _refresh) and records the outcome for GET /user/me/keywords
+    '''
+    try:
+        result = await _refresh(user_id, token, query)
+    except HTTPException:
+        raise   # unknown user: nothing to record
+    except Exception:
+        _record_outcome(user_id, failed=True)
+        raise
+    _record_outcome(user_id, failed="error" in (result["dmm"], result["llm"]))
+    return result
+
+
+async def _refresh(user_id: str, token: str, query: str | None = None) -> dict:
     '''
     Refreshes the user's keywords from the queries added to the DMM since the last refresh.
 
@@ -227,37 +278,53 @@ async def _refresh_in_background(user_id: str, token: str, query: str | None) ->
                     user_id, r["dmm"], r["llm"], r["added"], r["refreshed"], r["detail"])
     except Exception:
         logger.exception("Refresh of %s failed", user_id)
+    finally:
+        with _state_lock:
+            _refresh_state[user_id].scheduled -= 1
 
 
 #=============================
 # Keywords of the token's own user
 
 # exposes the user's keywords to the UI
-@router.get("/user/me/keywords", summary="Keywords of the token's own user (UI profile page)")
+@router.get("/user/me/keywords", response_model=MyKeywords,
+            summary="Keywords of the token's own user (UI profile page)")
 def get_my_keywords(tasks: BackgroundTasks,
                     token: str = Depends(oauth2_scheme),
                     claims: dict = Depends(security.require_app_scope)):
     '''
-    Keywords stored in grafeo, with weight and "expired" flag
+    Keywords stored in grafeo, with weight and "expired" flag. When there are none, status says why:
         - "ok": keywords available
-        - "pending": none yet, a refresh from the DMM has been started -> reload later
-        - "no_queries": the UP has never seen this user
-        - "no_keywords": processed, but no keywords came out
+        - "pending": a refresh from the DMM is running -> ask again in a few seconds
+        - "no_queries": the DMM has no queries for the user yet
+        - "no_keywords": the queries were processed, but no keywords came out
+        - "error": the last refresh failed (DMM or LLM); it is retried later
+        - "no_profile": the UP has no profile for this user yet
+    A user without keywords gets a new refresh at most every KEYWORD_REFRESH_COOLDOWN_SECONDS
+    (and always after a restart), so polling this endpoint is cheap.
     '''
     user_id = claims["sub"]
     profile = load_user_profile(user_id)
     if profile is None:
-        return {"status": "no_queries", "keywords": []}
+        return {"status": "no_profile", "keywords": []}
 
     keywords = weighted_keywords(profile)
     if keywords:
         return {"status": "ok", "keywords": keywords}
 
-    tasks.add_task(_refresh_in_background, user_id, token, None)
-    if last_processed_at(profile) is None:
-        status = "pending" 
-    else:
-        status = "no_keywords"
+    with _state_lock:
+        state = _refresh_state[user_id]
+        busy = state.scheduled > 0
+        stale = state.finished_at is None or time.monotonic() - state.finished_at > KEYWORD_REFRESH_COOLDOWN_SECONDS
+        failed = state.failed
+    if busy:
+        return {"status": "pending", "keywords": []}
+    if stale:
+        _schedule_refresh(tasks, user_id, token, None)
+        return {"status": "pending", "keywords": []}
+    if failed:
+        return {"status": "error", "keywords": []}
+    status = "no_queries" if last_processed_at(profile) is None else "no_keywords"
     return {"status": status, "keywords": []}
 
 
@@ -274,7 +341,7 @@ def notify_query(user_id: str, payload: QueryEvent, tasks: BackgroundTasks,
     '''
     created = _ensure_user(user_id, claims)
     logger.info("Query notified for %s: %r", user_id, payload.query[:80])
-    tasks.add_task(_refresh_in_background, user_id, token, payload.query)
+    _schedule_refresh(tasks, user_id, token, payload.query)
     return {"status": "accepted", "created": created}
 
 

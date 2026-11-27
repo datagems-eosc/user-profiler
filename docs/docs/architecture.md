@@ -85,7 +85,7 @@ UI ──query──▶ Query Recommender ──POST /user/{id}/queries──▶
 3. **Extract.** If there are new queries, the LLM is asked for their keywords. The reply is requested as JSON of the form `{"keywords": [...]}`, constrained with a JSON schema where the LLM endpoint supports it, then validated, trimmed and de-duplicated.
 4. **Save.** The keywords are appended to the profile: new ones are added, ones already present have their `lastSeenAt` refreshed, restoring their full weight. The new queries are added to `dmm-history`.
 
-Refreshes of the same user run one at a time, so two notifications arriving together do not process the same queries twice. A refresh that fails (DMM or LLM unreachable, invalid LLM reply) changes nothing and is logged: the queries are picked up again by the next refresh. `GET /user/me/keywords` also starts a refresh when the user has no keywords yet.
+Refreshes of the same user run one at a time, so two notifications arriving together do not process the same queries twice. A refresh that fails (DMM or LLM unreachable, invalid LLM reply) changes nothing and is logged: the queries are picked up again by the next refresh. `GET /user/me/keywords` also starts a refresh when the user has no keywords yet, at most once every `KEYWORD_REFRESH_COOLDOWN_SECONDS` (60) per user. The service keeps in memory, per user, whether a refresh is running and whether the last one failed, and derives the status it returns from that (`pending`, `error`, ...). After a restart this is empty, so the first request starts a new refresh.
 
 ## Manual keyword extraction
 

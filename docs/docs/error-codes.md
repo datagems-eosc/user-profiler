@@ -37,6 +37,7 @@ Error responses follow the standard FastAPI format: a JSON object with a `detail
 | 404 | `ORCID profile not found: '<orcid_id>'` | Unknown ORCID iD |
 | 409 | `User '<user_id>' already exists` | `POST /user/{user_id}` with an id already in use |
 | 422 | `user_id must be a lowercase, hyphenated UUID` | `POST /user/{user_id}` with an invalid id |
+| 422 | *(list)* `Value error, <field> cannot be null: leave the field out to keep its value` | A `PATCH` setting `name`, `surname`, `email`, `affiliation` (or, for `/user/{user_id}`, `keywords` or `sessions`) to `null`. An empty string gives a similar `string_too_short` error |
 | 502 | `The DMM could not be reached: ...` | Network error towards the DMM |
 | 502 | `The DMM returned <status>: ...` | The DMM answered with an error, e.g. 401/403 if it rejects the forwarded token |
 | 502 | `The DMM returned an unexpected response` | The DMM reply could not be parsed |

@@ -5,9 +5,21 @@ Covers both the token's own user (/user/me) and users by ID (/user/{user_id}).
 import logging, threading
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.encoders import jsonable_encoder
+from pydantic import ValidationError
 
 from ..resources import security
-from ..resources.data_models import KeywordsAppend, UserCreate, UserEdit, UserProfile, UserMe
+from ..resources.data_models import (
+    ErrorDetail,
+    KeywordList,
+    KeywordsAppend,
+    Message,
+    UserCreate,
+    UserEdit,
+    UserMe,
+    UserMeOut,
+    UserProfile,
+)
 from ..resources.graph_helpers import (
     list_users,
     build_user_subgraph,
@@ -29,6 +41,9 @@ router = APIRouter()
 # ensures the same user is not created twice by concurrent requests
 _create_lock = threading.Lock()
 
+# shown in the OpenAPI document of the /user/me endpoints
+_NO_PROFILE = {404: {"model": ErrorDetail, "description": "The token's user has no profile yet: create it with POST /user/me"}}
+
 
 #=========================
 # FUNCTIONS FOR INTERNAL USE
@@ -37,7 +52,11 @@ _create_lock = threading.Lock()
 
 def _save(profile: dict) -> UserProfile:
     """Rewrite the user's whole subgraph from a (modified) profile dict."""
-    updated = UserProfile(**profile)
+    try:
+        updated = UserProfile(**profile)
+    except ValidationError as exc:
+        # Safety net: the request models should already have rejected this. Nothing has been written yet
+        raise HTTPException(status_code=422, detail=jsonable_encoder(exc.errors(include_url=False))) from exc
     delete_user_subgraph(updated.userId)
     build_user_subgraph(updated)
     return updated
@@ -128,9 +147,14 @@ def _ensure_user(user_id: str, claims: dict) -> bool:
 
 # USER CREATION
 
+# Every /user/me endpoint answers with UserMeOut (response_model): keywords and sessions are
+# left out the same way everywhere, so the UI always gets the same object
+
 # new endpoint for the UI
-@router.post("/user/me", status_code=201, summary="Create the token's own user, or complete it if it already exists")
-def create_me(response: Response, payload: UserEdit | None = None,
+@router.post("/user/me", status_code=201, response_model=UserMeOut,
+             responses={200: {"model": UserMeOut, "description": "The user already existed: the body was applied as an edit"}},
+             summary="Create the token's own user, or complete it if it already exists")
+def create_me(response: Response, payload: UserMe | None = None,
               claims: dict = Depends(security.require_app_scope)):
     '''
     The user ID is the token's sub
@@ -138,42 +162,41 @@ def create_me(response: Response, payload: UserEdit | None = None,
           adds the missing fields or overrides the token's ones --> 201
         - existing user (e.g. already created by a QR notification): the body is applied
           as a PATCH --> 200
+    Safe to call every time the profile page opens: it never creates the user twice.
     '''
-    
+
     # get user id from the token
     #   + user info
     user_id = claims["sub"]
     body = payload.model_dump(exclude_none=True) if payload else {}
-    
+
     with _create_lock:
         current = load_user_profile(user_id)
         if current is None:
             return _create(user_id, UserCreate(**(_user_from_token(claims).model_dump() | body)))
         response.status_code = 200
-        return _apply_edit(current, UserEdit(**body)) if body else UserProfile(**current)
+        return _apply_edit(current, UserEdit(**body)) if body else current
 
 
 # USER PROFILE MANIPULATION
 
 
-@router.get("/user/me", summary="Retrieve the token's own user")
+@router.get("/user/me", response_model=UserMeOut, responses=_NO_PROFILE, summary="Retrieve the token's own user")
 def get_me(claims: dict = Depends(security.require_app_scope)):
-    profile = _require_user(claims["sub"])
-    
-    # queries: the UI already displays them
-    profile.pop('sessions') 
-    
-    # keywords: there is a specific endpiont to retrive them
-    profile.pop('keywords')
-    return profile
+    return _require_user(claims["sub"])
 
 
-@router.patch("/user/me", summary="Edit the token's own user")
+@router.patch("/user/me", response_model=UserMeOut, responses=_NO_PROFILE, summary="Edit the token's own user")
 def edit_me(payload: UserMe, claims: dict = Depends(security.require_app_scope)):
+    '''
+    Only the fields in the body change. null clears dateOfBirth, location and orcid;
+    the required fields (name, surname, email, affiliation) cannot be null or empty.
+    location and orcid are replaced as a whole.
+    '''
     return _apply_edit(_require_user(claims['sub']), UserEdit(**payload.model_dump(exclude_unset=True)))
 
 
-@router.delete("/user/me", summary="Delete the token's own user")
+@router.delete("/user/me", response_model=Message, responses=_NO_PROFILE, summary="Delete the token's own user")
 def delete_me(claims: dict = Depends(security.require_app_scope)):
     _require_user(claims['sub'])
     delete_user_subgraph(claims['sub'])
@@ -200,7 +223,8 @@ def get_user_interest_profile(user_id: str):
     return build_interest_profile(_require_user(user_id))
 
 
-@router.get("/user/{user_id}/keywords", summary="List all keywords with their current weight, including expired ones")
+@router.get("/user/{user_id}/keywords", response_model=KeywordList,
+            summary="List all keywords with their current weight, including expired ones")
 def get_user_keywords(user_id: str):
     return {"keywords": weighted_keywords(_require_user(user_id))}
 

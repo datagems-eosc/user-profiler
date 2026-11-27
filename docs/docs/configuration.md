@@ -40,6 +40,7 @@ The preferred model is `kimi-k2.6`. The service checks it against the model list
 | `DMM_URL` | `https://datagems-dev.scayle.es/dmm` | Base URL of the Data Model Management service, where the users' queries are read from. In the DataGEMS cluster this is `http://data-model-management-service:5000`. The default is the public development instance, so always set it explicitly in a deployment |
 | `DMM_QUERY_ATTEMPTS` | `3` | How many times a keyword refresh reads the DMM while the notified query is not there yet |
 | `DMM_QUERY_RETRY_SECONDS` | `2` | Seconds between those attempts |
+| `KEYWORD_REFRESH_COOLDOWN_SECONDS` | `60` | For a user without keywords, the minimum time between two refreshes started by `GET /user/me/keywords`, so a polling interface does not flood the DMM. Refreshes triggered by query notifications are not limited |
 | `MAX_STORED_QUERIES` | `50` | How many queries are read from the DMM at a time, and kept in the user's `dmm-history` session |
 | `MOCK_DMM` | *(unset)* | Development only. When set to `1`, queries are read from a local `mock_aplog.json` file instead of the DMM |
 

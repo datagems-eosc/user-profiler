@@ -12,11 +12,12 @@ from ui_local import client as api
 from ui_local.components import parse_orcid_raw, render_keyword_tags
 
 _KW_STATUS = {
-    "pending": "No keywords yet: the UP has started a refresh from the user's DMM queries. "
+    "pending": "No keywords yet: the UP is reading the user's queries from the DMM. "
                "Press **Reload** in a few seconds.",
-    "no_keywords": "The user's queries were processed but no keywords came out "
-                   "(a new refresh has been started).",
-    "no_queries": "The UP has never seen this user.",
+    "no_queries": "No keywords yet: the DMM has no queries for this user. They appear after the first queries.",
+    "no_keywords": "The user's queries were processed, but no keywords came out.",
+    "error": "The keywords could not be updated (DMM or LLM error). The UP retries later.",
+    "no_profile": "The UP has no profile for this user yet.",
 }
 
 

@@ -30,7 +30,7 @@ Your token is not accepted by the DMM. As the service forwards your token to the
 
 ## What is the difference between `/user/me` and `/user/{user_id}`?
 
-`/user/me` works on the user the token belongs to, and is meant for the DataGEMS user interface: users see and edit their own profile without knowing their id. `GET /user/me` leaves out keywords and sessions, which `GET /user/me/keywords` and the interface itself show, and `PATCH /user/me` cannot change them. `/user/{user_id}` works on any user and returns everything.
+`/user/me` works on the user the token belongs to, and is meant for the DataGEMS user interface: users see and edit their own profile without knowing their id. The `/user/me` endpoints leave out keywords and sessions, which `GET /user/me/keywords` and the interface itself show, and `PATCH /user/me` cannot change them. `/user/{user_id}` works on any user and returns everything.
 
 ## Should I use `PATCH` to add keywords?
 
