@@ -5,6 +5,7 @@ Covers both the token's own user (/user/me) and users by ID (/user/{user_id}).
 import logging, threading
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 
@@ -14,6 +15,8 @@ from ..resources.data_models import (
     KeywordList,
     KeywordsAppend,
     Message,
+    OrcidImport,
+    OrcidPreview,
     UserCreate,
     UserEdit,
     UserMe,
@@ -26,7 +29,7 @@ from ..resources.graph_helpers import (
     delete_user_subgraph,
     load_user_profile,
 )
-from ..resources.orcid_helpers import fetch_orcid_profile
+from ..resources.orcid_helpers import fetch_orcid_profile, normalize_orcid_id, orcid_name, parse_orcid_record
 from ..resources.profile_helpers import (
     append_keywords,
     build_interest_profile,
@@ -90,19 +93,28 @@ def _create(user_id: str, payload: UserCreate) -> UserProfile:
     return profile
 
 
+def _token_identity(claims: dict) -> dict:
+    '''
+    Name, surname and email found in the Keycloak token (only the ones present).
+    They are read-only in the UP: the identity provider is their source of truth.
+    '''
+    identity = {
+        "name": claims.get("given_name") or claims.get("preferred_username"),
+        "surname": claims.get("family_name"),
+        "email": claims.get("email"),
+    }
+    return {k: v.strip() for k, v in identity.items() if isinstance(v, str) and v.strip()}
+
+
 def _user_from_token(claims: dict) -> UserCreate:
     '''
     User data available in the Keycloak token
-    
+
     input:
         - claims (dict): info form the token
     '''
-    return UserCreate(
-        name=claims.get("given_name") or claims.get("preferred_username") or "-",
-        surname=claims.get("family_name") or "-",
-        email=claims.get("email") or "-",
-        affiliation="unknown",
-    )
+    return UserCreate(**({"name": "-", "surname": "-", "email": "-", "affiliation": "unknown"}
+                         | _token_identity(claims)))
 
 
 #--------------------------------
@@ -152,17 +164,18 @@ def _ensure_user(user_id: str, claims: dict) -> bool:
 
 # new endpoint for the UI
 @router.post("/user/me", status_code=201, response_model=UserMeOut,
-             responses={200: {"model": UserMeOut, "description": "The user already existed: the body was applied as an edit"}},
-             summary="Create the token's own user, or complete it if it already exists")
+             responses={200: {"model": UserMeOut, "description": "The user already existed: name, surname and email "
+                                                                 "were updated from the token, and the body was applied as an edit"}},
+             summary="Create the token's own user, or sync it if it already exists (call it after every sign-in)")
 def create_me(response: Response, payload: UserMe | None = None,
               claims: dict = Depends(security.require_app_scope)):
     '''
-    The user ID is the token's sub
+    The user ID is the token's sub. Meant to be called after every sign-in:
         - new user: name, surname and email from the token, the body (e.g. {"affiliation": "..."})
-          adds the missing fields or overrides the token's ones --> 201
-        - existing user (e.g. already created by a QR notification): the body is applied
-          as a PATCH --> 200
-    Safe to call every time the profile page opens: it never creates the user twice.
+          adds the other fields --> 201 (first sign-in: the UI can show its onboarding)
+        - existing user (e.g. already created by a QR notification): name, surname and email are
+          updated from the token if they changed, and the body is applied as a PATCH --> 200
+    It never creates the user twice.
     '''
 
     # get user id from the token
@@ -175,7 +188,12 @@ def create_me(response: Response, payload: UserMe | None = None,
         if current is None:
             return _create(user_id, UserCreate(**(_user_from_token(claims).model_dump() | body)))
         response.status_code = 200
-        return _apply_edit(current, UserEdit(**body)) if body else current
+        # only rewrite the profile when something actually changes
+        changes = {k: v for k, v in (_token_identity(claims) | body).items() if current.get(k) != v}
+        if changes:
+            logger.info("Profile of %s updated at sign-in: %s", user_id, sorted(changes))
+            return _apply_edit(current, UserEdit(**changes))
+        return current
 
 
 # USER PROFILE MANIPULATION
@@ -189,9 +207,10 @@ def get_me(claims: dict = Depends(security.require_app_scope)):
 @router.patch("/user/me", response_model=UserMeOut, responses=_NO_PROFILE, summary="Edit the token's own user")
 def edit_me(payload: UserMe, claims: dict = Depends(security.require_app_scope)):
     '''
-    Only the fields in the body change. null clears dateOfBirth, location and orcid;
-    the required fields (name, surname, email, affiliation) cannot be null or empty.
-    location and orcid are replaced as a whole.
+    Editable: affiliation, dateOfBirth, location. Only the fields in the body change.
+    null clears dateOfBirth and location; affiliation cannot be null or empty.
+    name, surname and email come from the token, ORCID data from PUT /user/me/orcid:
+    sending them (or any other field) is a 422.
     '''
     return _apply_edit(_require_user(claims['sub']), UserEdit(**payload.model_dump(exclude_unset=True)))
 
@@ -201,6 +220,46 @@ def delete_me(claims: dict = Depends(security.require_app_scope)):
     _require_user(claims['sub'])
     delete_user_subgraph(claims['sub'])
     return {"message": f"User '{claims['sub']}' deleted."}
+
+
+# ORCID OF THE TOKEN'S OWN USER
+
+_ORCID_ERRORS = {
+    422: {"description": "Not a valid ORCID iD (format or check digit)"},
+    502: {"model": ErrorDetail, "description": "ORCID could not be reached or answered with an error"},
+}
+
+
+def _set_orcid(user_id: str, orcid: dict | None) -> dict:
+    # loaded only now, after the ORCID call, so that no concurrent change is overwritten
+    current = _require_user(user_id)
+    current["orcid"] = orcid
+    return _save(current).model_dump()
+
+
+@router.put("/user/me/orcid", response_model=UserMeOut,
+            responses=_NO_PROFILE | {404: {"model": ErrorDetail, "description": "No profile yet, or unknown ORCID iD"}}
+            | _ORCID_ERRORS,
+            summary="Import the token's own user's ORCID record")
+async def import_my_orcid(payload: OrcidImport, claims: dict = Depends(security.require_app_scope)):
+    '''
+    The UP fetches the public record of the iD from ORCID, keeps its keywords and works
+    (title, DOI, journal, year) and saves them, replacing any previous ORCID data.
+    Calling it again with the same iD refreshes the data from ORCID.
+    '''
+    await run_in_threadpool(_require_user, claims["sub"])   # 404 before calling ORCID
+    orcid_id = normalize_orcid_id(payload.id)
+    record = parse_orcid_record(await fetch_orcid_profile(orcid_id), orcid_id)
+    profile = await run_in_threadpool(_set_orcid, claims["sub"], record)
+    logger.info("ORCID %s imported for %s: %d keywords, %d works",
+                orcid_id, claims["sub"], len(record["keywords"]), len(record["publications"]))
+    return profile
+
+
+@router.delete("/user/me/orcid", response_model=UserMeOut, responses=_NO_PROFILE,
+               summary="Remove the ORCID data of the token's own user")
+def remove_my_orcid(claims: dict = Depends(security.require_app_scope)):
+    return _set_orcid(claims["sub"], None)
 
 
 #=========================================
@@ -248,6 +307,19 @@ def delete_user(user_id: str):
     _require_user(user_id)
     delete_user_subgraph(user_id)
     return {"message": f"User '{user_id}' deleted."}
+
+
+@router.get("/orcid/{orcid_id}/summary", response_model=OrcidPreview,
+            responses={404: {"model": ErrorDetail, "description": "Unknown ORCID iD"}} | _ORCID_ERRORS,
+            summary="Preview an ORCID record as it would be imported (nothing is saved)")
+async def get_orcid_summary(orcid_id: str):
+    '''
+    The parsed record plus the name on it, so the UI can ask "is this you?"
+    before calling PUT /user/me/orcid.
+    '''
+    orcid_id = normalize_orcid_id(orcid_id)
+    raw = await fetch_orcid_profile(orcid_id)
+    return parse_orcid_record(raw, orcid_id) | {"name": orcid_name(raw)}
 
 
 @router.get("/orcid/{orcid_id}", summary="Fetch raw ORCID profile")

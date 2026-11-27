@@ -89,6 +89,10 @@ def patch(path: str, payload: dict):
     return _call("PATCH", path, json=payload)
 
 
+def put(path: str, payload: dict, timeout: int = 5):
+    return _call("PUT", path, timeout, json=payload)
+
+
 def delete(path: str):
     return _call("DELETE", path)
 

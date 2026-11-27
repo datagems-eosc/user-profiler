@@ -9,7 +9,7 @@ The service interacts with the following components:
 * **DataGEMS AAI (Keycloak)**: issues the access tokens that callers present. The service downloads the realm's public keys (JWKS) to verify them. See [Security](security.md).
 * **[Data Model Management (DMM)](https://datagems-eosc.github.io/data-model-management/)**: records the analytical patterns, and so the natural language queries, that users run on the platform. The service reads a user's recent queries from it to extract keywords.
 * **LLM endpoint**: an OpenAI-compatible chat completions Api (in the DataGEMS deployment, the one served at `chat.scayle.es`). It extracts keywords from the queries.
-* **[ORCID public Api](https://info.orcid.org/documentation/features/public-api/)**: provides public researcher records, used to fill in ORCID data for a profile.
+* **[ORCID public Api](https://info.orcid.org/documentation/features/public-api/)**: provides public researcher records. When a user gives their ORCID iD, the service fetches the record and saves its keywords and works.
 * **[Query Recommender](https://datagems-eosc.github.io/query-recommender/)**: reads the portable interest profile to personalise its suggestions, and notifies this service of every query a user runs, which keeps the keywords up to date.
 * **DataGEMS user interface**: shows and edits the user's own profile and keywords through the `/user/me` endpoints.
 
@@ -101,14 +101,14 @@ Keywords can also be extracted on request, in two steps, so that a person or a c
 ## Code layout
 
 * `up_api/main.py`: the FastAPI application: lifespan of the database, Api root, and the routers below, all protected by token validation
-* `up_api/routers/user.py`: user creation, retrieval, editing and deletion, for `/user/me` and `/user/{user_id}`, the interest profile and the ORCID lookup
+* `up_api/routers/user.py`: user creation (and sync at sign-in), retrieval, editing and deletion, for `/user/me` and `/user/{user_id}`, the interest profile, the ORCID import and the ORCID lookups
 * `up_api/routers/keywords.py`: the DMM client, query notifications, the keyword refresh, `/user/me/keywords` and `generate-keywords`
 * `up_api/routers/dev.py`: the development endpoints (user creation with a generated or given id, `refresh-keyword_test`, `queries_test`)
 * `up_api/resources/security.py`: token validation and the `authtest` endpoint
 * `up_api/resources/graph_helpers.py`: GQL utilities and the graph read / write operations
 * `up_api/resources/profile_helpers.py`: keyword weights, timestamps, the `dmm-history` session and the portable profile
 * `up_api/resources/LLM_helpers.py`: model selection, prompt, LLM call and reply validation
-* `up_api/resources/orcid_helpers.py`: ORCID public Api client
+* `up_api/resources/orcid_helpers.py`: ORCID public Api client: iD validation, record fetching and parsing
 * `up_api/resources/data_models.py`: the node models and request bodies
 * `schema/user_model.pg`: the PG-schema of the graph
 * `examples/`: end to end example scripts, in bash and PowerShell

@@ -26,30 +26,14 @@ def parse_llm_keywords(text: str) -> list[str]:
     return [p for p in cleaned if p]
 
 
-def parse_orcid_raw(raw: dict, orcid_id: str) -> dict:
-    """Raw ORCID record -> the API's ORCID model (id, keywords, publications)."""
-    kw_list = (raw.get("person") or {}).get("keywords", {}).get("keyword", [])
-    keywords = [{"value": k["content"]} for k in kw_list if k.get("content")]
-
-    pubs = []
-    groups = (raw.get("activities-summary") or {}).get("works", {}).get("group", [])
-    for group in groups:
-        for summary in group.get("work-summary", []):
-            title = (summary.get("title") or {}).get("title", {}).get("value", "")
-            jt = summary.get("journal-title")
-            yr = (summary.get("publication-date") or {}).get("year")
-            doi = next((e.get("external-id-value", "")
-                        for e in (summary.get("external-ids") or {}).get("external-id", [])
-                        if e.get("external-id-type") == "doi"), "")
-            if title:
-                pubs.append({
-                    "title": title, "doi": doi,
-                    "journal": jt.get("value", "") if jt else "",
-                    "year": int(yr["value"]) if yr and yr.get("value") else 0,
-                    "authors": [],
-                })
-
-    return {"id": orcid_id, "keywords": keywords, "publications": pubs}
+def fetch_orcid(orcid_id: str) -> dict:
+    """
+    ORCID record parsed by the API (GET /orcid/{id}/summary) -> the API's ORCID model
+    (id, keywords, publications). Parsing happens in the API, so the UI and the API agree.
+    """
+    preview = api.get(f"/orcid/{orcid_id.strip()}/summary", timeout=20)
+    preview.pop("name", None)
+    return preview
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +110,7 @@ def render_user_form(defaults: dict = None) -> dict | None:
             if st.button("Fetch from ORCID"):
                 if orcid_id:
                     try:
-                        st.session_state._orcid_data = parse_orcid_raw(api.get(f"/orcid/{orcid_id}"), orcid_id)
+                        st.session_state._orcid_data = fetch_orcid(orcid_id)
                         st.success("ORCID data fetched.")
                         st.rerun()
                     except Exception as e:
@@ -162,7 +146,7 @@ def render_user_form(defaults: dict = None) -> dict | None:
     if add_orc and orcid_id:
         fetched = st.session_state.get("_orcid_data") or {}
         payload["orcid"] = {
-            "id": orcid_id,
+            "id": fetched.get("id") or orcid_id,
             "keywords": fetched.get("keywords", []),
             "publications": fetched.get("publications", []),
         }

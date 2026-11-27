@@ -37,13 +37,19 @@ The `/user/me` endpoints only ever act on the user the token belongs to: the use
 
 Full profiles (`GET /user/{user_id}`) include personal data, such as email and date of birth, and the user's query log. Services that only need to personalise their behaviour should use the portable profile (`GET /user/{user_id}/profile`), which leaves these out.
 
-Users created automatically get their name, surname and email from the claims of their token (`given_name` or `preferred_username`, `family_name`, `email`). Users can see and change these data, or delete their profile, through the `/user/me` endpoints.
+Name, surname and email come from the claims of the user's token (`given_name` or `preferred_username`, `family_name`, `email`), i.e. from the identity provider they signed in with. They are read-only in the service and refreshed at each sign-in (`POST /user/me`), so the identity provider stays their single source of truth. Users can see their data, edit their affiliation, date of birth and location, or delete their profile, through the `/user/me` endpoints.
+
+## ORCID data
+
+ORCID data is always fetched by the service from the [ORCID public Api](https://info.orcid.org/documentation/features/public-api/): clients send only an iD (`PUT /user/me/orcid`), never the record's content, so the publications and the ORCID keywords cannot be made up. The iD is validated (format and check digit) before ORCID is called.
+
+The service does not verify that the iD belongs to the user, though: anyone can import any public ORCID record into their own profile. Verifying it requires the user to sign in to ORCID ("authenticated ORCID iD"), which is not implemented yet.
 
 ## Calls to other services
 
 To extract keywords, the service reads the user's queries from the DMM on behalf of the caller, by forwarding the caller's access token as is. There is no token exchange: the token must also be accepted by the DMM, so its audience must include the DMM as well. If the DMM rejects the token, keyword generation answers 502 with the DMM status code, and the automatic refresh logs the error. For query notifications, the token is the user's own, forwarded by the Query Recommender, and is kept in memory only for the duration of the background refresh.
 
-The caller's token is never sent to the LLM endpoint, which is called with a dedicated service token, nor to ORCID, whose public Api needs no authentication.
+The caller's token is never sent to the LLM endpoint, which is called with a dedicated service token, nor to ORCID, whose public Api needs no authentication. Only the ORCID iD is sent to ORCID.
 
 ## TLS towards the LLM endpoint
 

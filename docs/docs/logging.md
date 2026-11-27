@@ -33,6 +33,8 @@ The keyword refresh runs in the background after a query notification, so its ou
 |---|---|---|
 | INFO | `Query notified for <user_id>: '<query>'` | A query notification was received and a refresh started |
 | INFO | `User <user_id> not in the graph: created from the token` | The user was unknown and was created from the token's claims |
+| INFO | `Profile of <user_id> updated at sign-in: [...]` | `POST /user/me` changed these fields, e.g. a new email from the identity provider |
+| INFO | `ORCID <orcid_id> imported for <user_id>: <n> keywords, <n> works` | An ORCID record was imported with `PUT /user/me/orcid` |
 | INFO | `Refresh of <user_id>: dmm=... llm=... added=[...] refreshed=[...] detail=...` | Outcome of a refresh: `dmm` is `ok` or `error`, `llm` is `ok`, `error` or `skipped` (no new queries), followed by the new and refreshed keywords |
 | INFO | `Refresh of <user_id>: notified query already processed: '<query>'` | The notified query had already been processed by an earlier refresh, e.g. when the same query is notified twice |
 | WARNING | `Refresh of <user_id>: notified query not found in the DMM after <n> attempts: '<query>'` | The DMM did not have the notified query yet after all the attempts. Any other new queries are still processed, and the missing one is picked up by a later refresh |

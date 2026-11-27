@@ -2,7 +2,7 @@ from typing import Annotated, Literal, Optional
 import uuid
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
 # Required text fields sent by clients: surrounding spaces are trimmed, and empty values are rejected
@@ -33,9 +33,10 @@ class Author(BaseModel):
 
 class Publication(BaseModel):
     title: str
-    doi: str
-    journal: str
-    year: int
+    # Not every ORCID work has them: null rather than "" / 0
+    doi: Optional[str] = None
+    journal: Optional[str] = None
+    year: Optional[int] = None
     authors: list[Author] = Field(default_factory=list)
 
 
@@ -164,21 +165,32 @@ class QueryEvent(BaseModel):
 class UserMe(BaseModel):
     '''
     Fields the user can edit from the UI
-        --> excluding sessions and keywords
-    Send only the fields that change. null clears dateOfBirth, location and orcid,
-    and is rejected for the required fields.
+        - name, surname and email are read-only: they come from the token (Keycloak)
+        - ORCID data is set with PUT /user/me/orcid, keywords and sessions by the UP itself
+    Send only the fields that change. null clears dateOfBirth and location, and is rejected
+    for affiliation. Any other field is rejected (422), so a client cannot believe it changed it.
     '''
-    name: Optional[NonEmptyStr] = None
-    surname: Optional[NonEmptyStr] = None
+    model_config = ConfigDict(extra="forbid")
+
     dateOfBirth: Optional[datetime] = None
-    email: Optional[NonEmptyStr] = None
     affiliation: Optional[NonEmptyStr] = None
     location: Optional[Location] = None
-    orcid: Optional[ORCID] = None
 
     @model_validator(mode="after")
     def _no_null_required(self):
-        return _reject_nulls(self, ("name", "surname", "email", "affiliation"))
+        return _reject_nulls(self, ("affiliation",))
+
+
+class OrcidImport(BaseModel):
+    id: str = Field(description="ORCID iD, e.g. 0000-0002-1825-0097 (a https://orcid.org/... link also works)",
+                    examples=["0000-0002-1825-0097"])
+
+
+class OrcidPreview(ORCID):
+    '''
+    A parsed ORCID record, not saved: lets the UI ask "is this you?" before importing it
+    '''
+    name: Optional[str] = Field(None, description="Name on the ORCID record (credit name, or given + family names)")
 
 
 #----------------------------------------------------------------------------

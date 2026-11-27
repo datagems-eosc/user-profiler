@@ -17,11 +17,14 @@ Note that the user endpoints are served at the root of the service (e.g. `/users
 | GET | `/api/v1` | Api root: confirms the Api is running. No authentication |
 | POST | `/api/v1/authtest` | Checks that a bearer token is accepted by the service |
 | **Token's own user** | | *For the DataGEMS user interface: the user is the token's subject* |
-| POST | `/user/me` | Creates the token's own user, or completes it if it already exists |
+| POST | `/user/me` | Creates the token's own user, or syncs it with the token if it already exists. Call it after every sign-in |
 | GET | `/user/me` | Returns the token's own user, without keywords and sessions |
-| PATCH | `/user/me` | Edits the token's own user |
+| PATCH | `/user/me` | Edits the token's own affiliation, date of birth and location |
 | DELETE | `/user/me` | Deletes the token's own user |
 | GET | `/user/me/keywords` | Lists the keywords of the token's own user, with their status |
+| PUT | `/user/me/orcid` | Imports the ORCID record of the given iD into the token's own user |
+| DELETE | `/user/me/orcid` | Removes the ORCID data of the token's own user |
+| GET | `/orcid/{orcid_id}/summary` | Previews an ORCID record as it would be imported, without saving it |
 | **Users by id** | | |
 | GET | `/users` | Lists all users |
 | GET | `/user/{user_id}` | Returns the full profile of a user |
@@ -32,7 +35,7 @@ Note that the user endpoints are served at the root of the service (e.g. `/users
 | POST | `/user/{user_id}/keywords` | Appends session keywords to a user |
 | POST | `/user/{user_id}/queries` | Notifies a new query of the user, which triggers a keyword refresh |
 | GET | `/user/{user_id}/generate-keywords` | Proposes keywords from the user's recent queries, without saving them |
-| GET | `/orcid/{orcid_id}` | Returns a raw ORCID public record |
+| GET | `/orcid/{orcid_id}` | Returns a raw ORCID public record, unchanged |
 | **Development** | | *Kept for testing, not used by the DataGEMS UI or the Query Recommender* |
 | POST | `/user` | Creates a user, with a generated id |
 | POST | `/user/{user_id}` | Creates a user with a given id (e.g. the DMM one) |
@@ -43,7 +46,14 @@ All endpoints under `/user/{user_id}` answer `404 Not Found` with `{"detail": "N
 
 ## Token's own user
 
-These endpoints are meant for the DataGEMS user interface, e.g. a profile or settings page. They take no user id: the user is the subject (*sub* claim) of the access token, which is also the id the DMM logs the user's queries under. Users do not need to create their profile: the service creates it the first time it is notified of one of their queries (see [Query notifications](#query-notifications)). `POST /user/me` is there for users who open their profile before running any query.
+These endpoints are meant for the DataGEMS user interface, e.g. a profile or settings page. They take no user id: the user is the subject (*sub* claim) of the access token, which is also the id the DMM logs the user's queries under. The token is issued by the DataGEMS AAI (Keycloak) whatever the provider the user signed in with (e.g. their institution's single sign-on), so the id stays the same across providers.
+
+The intended flow is:
+
+1. After every sign-in, the interface calls `POST /user/me` (see [Sign in](#sign-in)). A `201` means this is the user's first sign-in: a good moment to ask for their affiliation and ORCID iD.
+2. The profile page shows `GET /user/me` and `GET /user/me/keywords`, and edits with `PATCH /user/me` and the ORCID endpoints.
+
+Users who never use the interface still get a profile: the service also creates it the first time it is notified of one of their queries (see [Query notifications](#query-notifications)).
 
 The response schemas of these endpoints are in the [OpenAPI Reference](openapi.md): `UserMeOut` for the profile, `MyKeywords` for the keywords.
 
@@ -74,17 +84,24 @@ The response schemas of these endpoints are in the [OpenAPI Reference](openapi.m
 }
 ```
 
-`name`, `surname`, `email` and `affiliation` are always present. `dateOfBirth`, `location` and `orcid` can be `null`.
+`name`, `surname`, `email` and `affiliation` are always present. `dateOfBirth`, `location` and `orcid` can be `null`. In `orcid`, `doi`, `journal` and `year` of a publication can be `null` when ORCID does not have them.
 
-### Create or complete
+`name`, `surname` and `email` are **read-only**: they come from the token, i.e. from the identity provider the user signed in with, and are kept up to date at each sign-in. The ORCID data comes from ORCID itself, through `PUT /user/me/orcid`.
 
-`POST /user/me` takes the user's name, surname and email from the token (`given_name` or `preferred_username`, `family_name`, `email`). The affiliation is set to `unknown`. The body is optional: its fields complete or override the ones from the token. It accepts the same fields as `PATCH /user/me`:
+### Sign in
+
+`POST /user/me` creates the profile, or syncs it with the token. Call it after every sign-in.
+
+* **First sign-in**: the profile is created with name, surname and email from the token (`given_name` or `preferred_username`, `family_name`, `email`), and the affiliation set to `unknown`. The service answers `201 Created` with the profile object.
+* **Later sign-ins** (or a profile already created by a query notification): name, surname and email are updated from the token if they changed, and the service answers `200 OK` with the profile object. Nothing is written when nothing changed.
+
+The body is optional, and accepts the same fields as `PATCH /user/me`, e.g. an affiliation collected during onboarding:
 
 ```json
 { "affiliation": "University of Verona" }
 ```
 
-If the user does not exist yet, the service answers `201 Created` with the profile object. If it already exists (for example, created by a query notification), the body is applied as an edit and the service answers `200 OK` with the updated profile. It never creates the same user twice, so the interface can call it every time the profile page opens, instead of calling `GET` and handling the `404`.
+It never creates the same user twice, so it can be called whenever it is convenient, instead of calling `GET` and handling the `404`.
 
 ### Retrieve
 
@@ -92,11 +109,48 @@ If the user does not exist yet, the service answers `201 Created` with the profi
 
 ### Edit
 
-`PATCH /user/me` changes only the fields present in the body and returns the updated profile object. The editable fields are `name`, `surname`, `dateOfBirth`, `email`, `affiliation`, `location` and `orcid`. Keywords and sessions cannot be changed through this endpoint: they are ignored if sent. As with `PATCH /user/{user_id}`, `location` and `orcid` are replaced as a whole.
+`PATCH /user/me` changes only the fields present in the body and returns the updated profile object. The editable fields are `affiliation`, `dateOfBirth` and `location`:
+
+```json
+{ "affiliation": "University of Verona", "location": { "city": "Verona", "country": "Italy" } }
+```
 
 * A field left out keeps its value.
-* `null` clears `dateOfBirth`, `location` or `orcid`.
-* `name`, `surname`, `email` and `affiliation` cannot be cleared: `null` or an empty string answers `422`. Surrounding spaces are trimmed.
+* `null` clears `dateOfBirth` or `location`. `location` is replaced as a whole.
+* `affiliation` cannot be cleared: `null` or an empty string answers `422`. Surrounding spaces are trimmed.
+* Any other field answers `422` (`extra_forbidden`), so that a client cannot believe it changed something it cannot: `name`, `surname` and `email` come from the token, `orcid` from `PUT /user/me/orcid`, keywords and sessions from the service itself.
+
+### ORCID
+
+The user gives their ORCID iD, and the service fetches the public record from ORCID itself, so the ORCID data shown in the profile and used for the keywords is always ORCID's own.
+
+1. **Preview** (optional): `GET /orcid/{orcid_id}/summary` returns the record as it would be imported, plus the `name` on it, without saving anything. The interface can use it to ask "is this you?" and catch a mistyped iD:
+
+    ```json
+    {
+      "id": "0000-0002-1825-0097",
+      "name": "Josiah Carberry",
+      "keywords": [{ "value": "psychoceramics", "addedAt": null, "lastSeenAt": null }],
+      "publications": [
+        { "title": "A Methodology for the Emulation of Architecture", "doi": "10.5555/12345680",
+          "journal": null, "year": 2012, "authors": [] }
+      ]
+    }
+    ```
+
+2. **Import**: `PUT /user/me/orcid` with the iD saves the record's keywords and works, replacing any previous ORCID data, and returns the profile object. Calling it again with the same iD refreshes the data from ORCID.
+
+    ```json
+    { "id": "0000-0002-1825-0097" }
+    ```
+
+3. **Remove**: `DELETE /user/me/orcid` removes the ORCID data and returns the profile object.
+
+The iD can be given as `0000-0002-1825-0097` or as a link (`https://orcid.org/0000-0002-1825-0097`). It is checked before calling ORCID, including its check digit: an invalid iD answers `422`, an iD unknown to ORCID `404`, and an ORCID outage `502`.
+
+Only the summary of the record is read: for each work, the title, DOI, journal and year (one entry per work, even when ORCID lists it from several sources), and no co-authors. The keywords of the record become the user's ORCID keywords, with a constant weight (see [Keyword ageing](architecture.md#keyword-ageing)).
+
+The service does not verify that the iD belongs to the user: anyone can import any public record. See [Security](security.md).
 
 ```json
 { "orcid": { "id": "0000-0002-1825-0097", "keywords": [], "publications": [] } }
@@ -366,7 +420,7 @@ The call can take a while, as it waits for both the DMM and the LLM. Clients sho
 
 ## ORCID
 
-`GET /orcid/{orcid_id}` fetches the full public ORCID record for the given ORCID iD from the [ORCID public Api](https://info.orcid.org/documentation/features/public-api/) and returns it unchanged. It is used by the Streamlit interface to fill in ORCID data when creating or editing a user. Nothing is saved.
+`GET /orcid/{orcid_id}` fetches the full public ORCID record for the given ORCID iD from the [ORCID public Api](https://info.orcid.org/documentation/features/public-api/) and returns it unchanged. Nothing is saved. Interfaces should prefer `GET /orcid/{orcid_id}/summary`, which returns the record already parsed (see [ORCID](#orcid) above). Both check the iD first, and answer `422`, `404` or `502` as described there.
 
 ## Auth test
 

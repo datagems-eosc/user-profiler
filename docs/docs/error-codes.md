@@ -16,13 +16,13 @@ The service makes use of the following subset of HTTP Status Codes:
 * 404 Not Found - the user, or the ORCID record, does not exist
 * 409 Conflict - a user with the given id already exists
 * 422 Unprocessable Content - the request does not match the expected model, or a given user id is not a valid UUID
-* 502 Bad Gateway - an underpinning service (DMM or LLM) could not be reached, returned an error, or replied with unexpected output
+* 502 Bad Gateway - an underpinning service (DMM, LLM or ORCID) could not be reached, returned an error, or replied with unexpected output
 * 503 Service Unavailable - the public keys needed to verify the token could not be fetched from the identity provider
 * 500 Internal Server Error - an unexpected condition prevented the service from fulfilling the request
 
 Authentication is checked first, so a request with a bad token gets a 401 or 403 regardless of anything else in it.
 
-Errors returned by the ORCID public Api, other than 404, are passed on with the same status code.
+For the ORCID endpoints, an iD unknown to ORCID is a 404, and any other ORCID error, or ORCID being unreachable, is a 502.
 
 ## Error responses
 
@@ -37,7 +37,10 @@ Error responses follow the standard FastAPI format: a JSON object with a `detail
 | 404 | `ORCID profile not found: '<orcid_id>'` | Unknown ORCID iD |
 | 409 | `User '<user_id>' already exists` | `POST /user/{user_id}` with an id already in use |
 | 422 | `user_id must be a lowercase, hyphenated UUID` | `POST /user/{user_id}` with an invalid id |
-| 422 | *(list)* `Value error, <field> cannot be null: leave the field out to keep its value` | A `PATCH` setting `name`, `surname`, `email`, `affiliation` (or, for `/user/{user_id}`, `keywords` or `sessions`) to `null`. An empty string gives a similar `string_too_short` error |
+| 422 | *(list)* `Value error, <field> cannot be null: leave the field out to keep its value` | A `PATCH` setting `affiliation` (or, for `/user/{user_id}`, `name`, `surname`, `email`, `keywords` or `sessions`) to `null`. An empty string gives a similar `string_too_short` error |
+| 422 | *(list)* `Extra inputs are not permitted` (`extra_forbidden`) | `PATCH` or `POST /user/me` with a field that cannot be edited there, e.g. `name` (read-only, from the token) or `orcid` (use `PUT /user/me/orcid`) |
+| 422 | `Not an ORCID iD: '...'` / `Not a valid ORCID iD: '...' (wrong check digit)` | An ORCID iD with the wrong format or check digit |
+| 502 | `ORCID could not be reached: ...` / `ORCID returned <status>` | ORCID is down or answered with an error |
 | 502 | `The DMM could not be reached: ...` | Network error towards the DMM |
 | 502 | `The DMM returned <status>: ...` | The DMM answered with an error, e.g. 401/403 if it rejects the forwarded token |
 | 502 | `The DMM returned an unexpected response` | The DMM reply could not be parsed |
@@ -73,6 +76,6 @@ For example, creating a user without an email:
 
 ## Bad Gateway
 
-A 502 means the request was valid and authenticated, but an underpinning service needed to serve it did not work as expected. It only concerns `generate-keywords` and `queries_test`, which depend on the DMM and, for the former, the LLM.
+A 502 means the request was valid and authenticated, but an underpinning service needed to serve it did not work as expected. It only concerns `generate-keywords` and `queries_test`, which depend on the DMM and, for the former, the LLM, and the ORCID endpoints, which depend on ORCID.
 
 The keyword refresh never answers 502: query notifications are answered with 202 before the DMM and the LLM are called, and their failures are only logged. The development endpoint `refresh-keyword_test` reports them in its body (`"dmm": "error"` or `"llm": "error"`, with a `detail`) with status 200. For the DMM, the `detail` includes the status code it returned, which helps telling a rejected token (401/403) from an outage. For the LLM, the exact cause is logged by the service (see [Logging](logging.md)) but not returned to the caller. As LLM replies vary between calls, retrying may succeed.

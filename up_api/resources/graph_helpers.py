@@ -55,6 +55,11 @@ def _props(**kwargs) -> str:
     return "{" + ", ".join(parts) + "}" if parts else "{}"
 
 
+def _pub_key(doi, title) -> str:
+    """Property map that identifies a publication of one ORCID record: its DOI, or its title when it has none."""
+    return f"{{doi: '{_q(doi)}'}}" if doi else f"{{title: '{_q(title)}'}}"
+
+
 def _run(query: str) -> None:
     db.execute(query)
 
@@ -107,13 +112,12 @@ def build_user_subgraph(profile: UserProfile) -> None:
                  f"INSERT (o)-[:HAS_KEYWORD]->(:Keyword {_props(value=kw.value)})")
 
         for pub in orc.publications:
-            doi = _q(pub.doi)
             _run(f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_ORCID]->(o:ORCID {{id: '{oid}'}}) "
                  f"INSERT (o)-[:HAS_PUBLICATION]->(:Publication {_props(title=pub.title, doi=pub.doi, journal=pub.journal, year=pub.year)})")
 
             for author in pub.authors:
                 _run(f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_ORCID]->(o:ORCID {{id: '{oid}'}})"
-                     f"-[:HAS_PUBLICATION]->(p:Publication {{doi: '{doi}'}}) "
+                     f"-[:HAS_PUBLICATION]->(p:Publication {_pub_key(pub.doi, pub.title)}) "
                      f"INSERT (p)-[:HAS_AUTHOR]->(:Author {_props(fullName=author.fullName)})")
 
     for session in profile.sessions:
@@ -201,17 +205,18 @@ def load_user_profile(user_id: str) -> Optional[dict]:
 
         publications = []
         for pr in pubs_rows:
-            pdoi = _q(pr["p.doi"])
+            # doi, journal and year can be missing (publications imported without them)
+            pdoi, ptitle = pr.get("p.doi"), pr.get("p.title")
             authors = _gql(
                 f"MATCH (u:User {{userId: '{uid}'}})-[:HAS_ORCID]->(o)"
-                f"-[:HAS_PUBLICATION]->(p:Publication {{doi: '{pdoi}'}})"
+                f"-[:HAS_PUBLICATION]->(p:Publication {_pub_key(pdoi, ptitle)})"
                 f"-[:HAS_AUTHOR]->(a) RETURN a.fullName"
             )
             publications.append({
-                "title":   pr["p.title"],
-                "doi":     pr["p.doi"],
-                "journal": pr["p.journal"],
-                "year":    pr["p.year"],
+                "title":   ptitle,
+                "doi":     pdoi,
+                "journal": pr.get("p.journal"),
+                "year":    pr.get("p.year"),
                 "authors": [{"fullName": a["a.fullName"]} for a in authors],
             })
 

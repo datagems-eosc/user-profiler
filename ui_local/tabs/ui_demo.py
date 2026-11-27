@@ -9,7 +9,7 @@ import requests
 import streamlit as st
 
 from ui_local import client as api
-from ui_local.components import parse_orcid_raw, render_keyword_tags
+from ui_local.components import render_keyword_tags
 
 _KW_STATUS = {
     "pending": "No keywords yet: the UP is reading the user's queries from the DMM. "
@@ -35,51 +35,59 @@ def _ro(col, label: str, value) -> None:
 
 @st.dialog("Edit profile")
 def _edit_me_dialog(me: dict):
+    '''
+    Mirrors the UI contract:
+        - name, surname and email are read-only (they come from the sign-in)
+        - affiliation: PATCH /user/me
+        - ORCID: preview with GET /orcid/{id}/summary, then PUT / DELETE /user/me/orcid
+    '''
     old_orcid = (me.get("orcid") or {}).get("id", "")
-    with st.form("demo_edit_me"):
-        c1, c2 = st.columns(2)
-        name = c1.text_input("Name *", me["name"])
-        surname = c2.text_input("Surname *", me["surname"])
-        email = st.text_input("Email *", me["email"])
-        affiliation = st.text_input("Affiliation *", me["affiliation"])
-        orcid_id = st.text_input("ORCID iD", old_orcid,
-                                 help="Leave empty to remove it. A new iD is fetched from ORCID on save.")
-        if not st.form_submit_button("Save", type="primary"):
+    st.caption(f"{me['name']} {me['surname']} · {me['email']}  (from your sign-in, not editable here)")
+
+    affiliation = st.text_input("Affiliation *", me["affiliation"]).strip()
+    orcid_id = st.text_input("ORCID iD", old_orcid,
+                             help="Leave empty to remove it. The record is fetched from ORCID by the UP.").strip()
+
+    # Preview before importing a new iD ("is this you?")
+    preview = None
+    if orcid_id and orcid_id != old_orcid:
+        try:
+            with st.spinner("Looking up ORCID..."):
+                preview = api.get(f"/orcid/{orcid_id}/summary", timeout=20)
+            st.info(f"ORCID record of **{preview.get('name') or 'unknown name'}**: "
+                    f"{len(preview['keywords'])} keywords, {len(preview['publications'])} works")
+        except requests.HTTPError as e:
+            st.error(f"ORCID: {api.error_detail(e)}")
+            return
+        except Exception as e:
+            st.error(f"Could not reach ORCID: {e}")
             return
 
-    fields = {"name": name.strip(), "surname": surname.strip(),
-              "email": email.strip(), "affiliation": affiliation.strip()}
-    if not all(fields.values()):
-        st.warning("Please fill in all required fields (marked with *).")
+    if not st.button("Save", type="primary"):
         return
-
-    # PATCH only what changed
-    payload = {k: v for k, v in fields.items() if v != me.get(k)}
-    orcid_id = orcid_id.strip()
-    if orcid_id != old_orcid:
-        if not orcid_id:
-            payload["orcid"] = None
-        else:
-            try:
-                with st.spinner("Fetching from ORCID..."):
-                    payload["orcid"] = parse_orcid_raw(api.get(f"/orcid/{orcid_id}", timeout=15), orcid_id)
-            except requests.HTTPError as e:
-                st.error(f"ORCID {api.error_detail(e)}")
-                return
-            except Exception as e:
-                st.error(f"Could not reach ORCID: {e}")
-                return
-    if not payload:
-        st.info("Nothing changed.")
+    if not affiliation:
+        st.warning("The affiliation cannot be empty.")
         return
 
     try:
-        api.patch("/user/me", payload)
+        changed = False
+        if affiliation != me["affiliation"]:
+            api.patch("/user/me", {"affiliation": affiliation})
+            changed = True
+        if orcid_id != old_orcid:
+            if orcid_id:
+                api.put("/user/me/orcid", {"id": orcid_id}, timeout=20)
+            else:
+                api.delete("/user/me/orcid")
+            changed = True
     except requests.HTTPError as e:
         st.error(f"Could not save: {api.error_detail(e)}")
         return
     except Exception as e:
         st.error(f"Could not save: {e}")
+        return
+    if not changed:
+        st.info("Nothing changed.")
         return
     st.session_state._demo_saved = "Profile updated"
     st.rerun()  # closes the dialog and reloads the profile
