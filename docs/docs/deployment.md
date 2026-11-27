@@ -20,12 +20,12 @@ docker run -p 5000:5000 \
 
 ## Kubernetes
 
-In the DataGEMS development cluster the service runs in the `univr` namespace, as:
+In the DataGEMS clusters the service runs in the `univr` namespace, as:
 
 * a **Deployment** `user-profiler` with a **single replica** and the **`Recreate`** strategy, as the embedded database can only be used by one process at a time (see [Data Stores](datastore.md)). It has a readiness probe on TCP port 5000 and resource limits of 500m CPU and 2Gi memory
 * a **PersistentVolumeClaim** `user-profiler-pvc`, mounted on `/data`, holding the database (`GRAFEO_DB_PATH=/data/grafeo_data`)
 * a **ClusterIP Service** `user-profiler-service` on port 5000, which is how other services in the cluster, such as the Query Recommender, reach it
-* an **Ingress** and an **HTTPRoute** exposing `https://datagems-dev.scayle.es/up/...`, stripping the `/up` prefix (`ROOT_PATH` is set to `/up` accordingly), with request timeouts raised to 300 seconds to leave room for keyword generation
+* in development only, an **HTTPRoute** on the DataGEMS gateway exposing `https://datagems-dev.scayle.es/up/...`, stripping the `/up` prefix (`ROOT_PATH` is set to `/up` accordingly), with request timeouts raised to 300 seconds to leave room for keyword generation. In production the service is not exposed publicly: it is only reached inside the cluster, through its Service
 * a **VaultStaticSecret** that syncs the `LLM_TOKEN` from Vault into the `user-profiler-secrets` Kubernetes secret
 
 The manifests are maintained in the deployment repository of the service.
@@ -40,7 +40,7 @@ For the service to be able to operate, its underpinning services must be availab
 
 * the DataGEMS AAI, to verify tokens. Without it, authenticated calls fail with 503
 * a persistent volume for the database. Without it, users are lost at every redeploy
-* the DMM and the LLM endpoint, to generate keywords. Without them, keyword generation fails with 502, while every other endpoint keeps working
+* the DMM and the LLM endpoint, to extract keywords. Without them, keyword refreshes fail (and are logged) and keyword generation fails with 502, while every other endpoint keeps working
 * the ORCID public Api, to fetch ORCID records. Only `GET /orcid/{orcid_id}` depends on it
 
 The [Architecture](architecture.md) section describes the ecosystem in which the service needs to operate.

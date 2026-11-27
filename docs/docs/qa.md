@@ -12,10 +12,10 @@ All request bodies are validated against their models before they reach the data
 
 ## Output validation
 
-As keywords are produced by an LLM, the service does not trust its output. The LLM is asked to reply in a fixed JSON format, constrained with a JSON schema where the endpoint supports it. Every reply is then validated against that format, and the keywords are trimmed and de-duplicated before being returned. Replies that cannot be validated are reported to the caller as a 502 instead of being passed on. Generated keywords are only proposals: they are saved only when explicitly appended to the profile.
+As keywords are produced by an LLM, the service does not trust its output. The LLM is asked to reply in a fixed JSON format, constrained with a JSON schema where the endpoint supports it. Every reply is then validated against that format, and the keywords are trimmed and de-duplicated before being returned. Replies that cannot be validated are reported to the caller as a 502 instead of being passed on, or, in the automatic refresh, logged and discarded without changing the profile. Keywords from `generate-keywords` are only proposals, saved only when explicitly appended to the profile. Keywords from the automatic refresh are saved, but age like any other session keyword, and users can review them through `GET /user/me/keywords`.
 
 ## Testing
 
 The end to end example scripts in the [examples](https://github.com/datagems-eosc/user-profiler/tree/main/examples) folder exercise the endpoints against a local or deployed instance, starting from and returning to an empty database. They can be used as a smoke test, as shown in [Onboarding](onboarding.md).
 
-The Streamlit interface described in [Onboarding](onboarding.md) can be used for manual, end to end testing, including the DMM and LLM integration.
+The Streamlit interface described in [Onboarding](onboarding.md) can be used for manual, end to end testing, including the DMM and LLM integration and the `/user/me` endpoints used by the DataGEMS user interface.

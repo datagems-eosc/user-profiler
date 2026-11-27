@@ -33,7 +33,7 @@ uv sync
 uv run uvicorn up_api.main:app --reload
 ```
 
-The Api is then available at `http://localhost:8000`, with the Swagger UI at `http://localhost:8000/api/v1/swagger`. The database is created in `./grafeo_data`. To use keyword generation, set the LLM and DMM variables described in [Configuration](configuration.md).
+The Api is then available at `http://localhost:8000`, with the Swagger UI at `http://localhost:8000/api/v1/swagger`. The database is created in `./grafeo_data`. To extract keywords, set the LLM and DMM variables described in [Configuration](configuration.md).
 
 ## Examples
 
@@ -55,7 +55,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8000/users
 
 ## User interface
 
-The code repository includes a [Streamlit](https://streamlit.io/) interface, `app.py`, for interactive use:
+The code repository includes a [Streamlit](https://streamlit.io/) interface for testing, `app.py`, with one module per tab in `ui_local/tabs/`:
 
 ```bash
 uv sync                      # Streamlit is a development dependency
@@ -64,11 +64,14 @@ uv run streamlit run app.py
 
 In the sidebar you choose the Api to use (local, the DataGEMS development instance, or local with DMM mode) and paste the Keycloak access token, which can also be provided through the `DATAGEMS_TOKEN` environment variable. The interface warns when the token is missing or expired.
 
-It has three tabs:
+It has four tabs. Only the selected one runs, so the hidden tabs make no Api calls:
 
 * **Users**: list, create, edit and delete users. When creating or editing a user, ORCID data can be fetched from ORCID by iD. A user's page shows their location, keywords, ORCID data and sessions, and lets you generate keywords and **Accept & save** the new ones
 * **Chat**: pick a user and type queries as they would. Queries are recorded in a session, which is closed after 5 minutes of inactivity
 * **DMM queries**: look up the queries the DMM has logged for a user id, or the most recent queries by any user. Useful to find which user id a query was logged under
+* **UI demo**: a mock of the profile settings page of the DataGEMS user interface, for its developers. It only calls the `/user/me` endpoints, as the user of the token in the sidebar: it shows the profile, edits it, shows the keywords with their status, and offers to create the profile if it does not exist yet
+
+With **Local + DMM** selected, the **Users** tab also lets you add a DMM user to the local database and run a keyword refresh from the DMM.
 
 ## Tutorials
 

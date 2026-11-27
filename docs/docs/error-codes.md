@@ -10,6 +10,7 @@ The service makes use of the following subset of HTTP Status Codes:
 
 * 200 OK - the request has succeeded
 * 201 Created - the user was created
+* 202 Accepted - a query notification was received; the keyword refresh continues in the background
 * 401 Unauthorized - the request lacks valid authentication credentials: the token is missing, malformed, expired, has an invalid signature or was issued by another issuer
 * 403 Forbidden - the token is valid, but none of its audiences is allowed for this service
 * 404 Not Found - the user, or the ORCID record, does not exist
@@ -32,7 +33,7 @@ Error responses follow the standard FastAPI format: a JSON object with a `detail
 | 401 | `Missing bearer token` | No `Authorization: Bearer` header |
 | 401 | `Invalid token` | Bad signature, wrong issuer, expired or malformed token |
 | 403 | `Token missing required audience: one of user-profiler, query-recommender` | No allowed audience in the token |
-| 404 | `No such user: '<user_id>'` | Unknown user |
+| 404 | `No such user: '<user_id>'` | Unknown user. For the `/user/me` endpoints, the token's subject has no profile yet. For `POST /user/{user_id}/queries`, the user is unknown and is not the token's subject, so it cannot be created from the token |
 | 404 | `ORCID profile not found: '<orcid_id>'` | Unknown ORCID iD |
 | 409 | `User '<user_id>' already exists` | `POST /user/{user_id}` with an id already in use |
 | 422 | `user_id must be a lowercase, hyphenated UUID` | `POST /user/{user_id}` with an invalid id |
@@ -71,4 +72,6 @@ For example, creating a user without an email:
 
 ## Bad Gateway
 
-A 502 means the request was valid and authenticated, but an underpinning service needed to serve it did not work as expected. It only concerns `generate-keywords` and `queries_test`, which depend on the DMM and, for the former, the LLM. For the DMM, the `detail` includes the status code it returned, which helps telling a rejected token (401/403) from an outage. For the LLM, the exact cause is logged by the service (see [Logging](logging.md)) but not returned to the caller. As LLM replies vary between calls, retrying may succeed.
+A 502 means the request was valid and authenticated, but an underpinning service needed to serve it did not work as expected. It only concerns `generate-keywords` and `queries_test`, which depend on the DMM and, for the former, the LLM.
+
+The keyword refresh never answers 502: query notifications are answered with 202 before the DMM and the LLM are called, and their failures are only logged. The development endpoint `refresh-keyword_test` reports them in its body (`"dmm": "error"` or `"llm": "error"`, with a `detail`) with status 200. For the DMM, the `detail` includes the status code it returned, which helps telling a rejected token (401/403) from an outage. For the LLM, the exact cause is logged by the service (see [Logging](logging.md)) but not returned to the caller. As LLM replies vary between calls, retrying may succeed.

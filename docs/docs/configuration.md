@@ -29,7 +29,7 @@ See [Keyword ageing](architecture.md#keyword-ageing).
 | `LLM_MODEL_LIST` | *(none)* | URL listing the models available at the LLM endpoint, e.g. `https://chat.scayle.es/api/models`. If it is not set or cannot be reached, the preferred model name is used as is |
 | `LLM_SSL_VERIFY` | `true` | TLS certificate verification for the LLM endpoint. `true` verifies against the system CAs, a file path verifies against that CA bundle or certificate, `false` disables verification (for an endpoint with a self-signed certificate). With `false`, the service prints a warning at startup |
 
-The LLM is only needed by `GET /user/{user_id}/generate-keywords`. If these variables are not set, every other endpoint still works.
+The LLM is needed by the keyword refresh triggered by query notifications, and by `GET /user/{user_id}/generate-keywords`. If these variables are not set, every endpoint still answers, but no keywords are extracted: refreshes fail (and are logged), and `generate-keywords` answers 502.
 
 The preferred model is `kimi-k2.6`. The service checks it against the model list and falls back to the first available model if it is not offered. The preferred model is currently set in code, not through configuration.
 
@@ -37,14 +37,19 @@ The preferred model is `kimi-k2.6`. The service checks it against the model list
 
 | Variable | Default | Description |
 |---|---|---|
-| `DMM_URL` | `https://datagems-dev.scayle.es/dmm` | Base URL of the Data Model Management service, where the users' queries are read from. In the DataGEMS cluster this is `http://data-model-management-service:5000` |
+| `DMM_URL` | `https://datagems-dev.scayle.es/dmm` | Base URL of the Data Model Management service, where the users' queries are read from. In the DataGEMS cluster this is `http://data-model-management-service:5000`. The default is the public development instance, so always set it explicitly in a deployment |
+| `DMM_QUERY_ATTEMPTS` | `3` | How many times a keyword refresh reads the DMM while the notified query is not there yet |
+| `DMM_QUERY_RETRY_SECONDS` | `2` | Seconds between those attempts |
+| `MAX_STORED_QUERIES` | `50` | How many queries are read from the DMM at a time, and kept in the user's `dmm-history` session |
 | `MOCK_DMM` | *(unset)* | Development only. When set to `1`, queries are read from a local `mock_aplog.json` file instead of the DMM |
+
+See [Keyword refresh](architecture.md#keyword-refresh).
 
 ### Authentication
 
 | Variable | Default | Description |
 |---|---|---|
-| `OIDC_ISSUER_URL` | `https://datagems-dev.scayle.es/oauth/realms/dev` | The expected token issuer (*iss* claim), i.e. the DataGEMS AAI realm |
+| `OIDC_ISSUER_URL` | `https://datagems-dev.scayle.es/oauth/realms/dev` | The expected token issuer (*iss* claim), i.e. the DataGEMS AAI realm. The default is the development realm: in production it must be set to the production realm, otherwise production tokens are rejected |
 | `OIDC_JWKS_URL` | `{OIDC_ISSUER_URL}/protocol/openid-connect/certs` | Where the issuer public keys are fetched from |
 | `OIDC_CLIENT_ID` | `user-profiler` | The client id of this service |
 | `OIDC_ALLOWED_AUDIENCES` | `{OIDC_CLIENT_ID},query-recommender` | Comma separated list of audiences: a token is accepted if its *aud* claim contains any of them |

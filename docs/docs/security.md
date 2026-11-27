@@ -29,15 +29,19 @@ The location of the configuration governing this behaviour is described in the r
 
 ## Authorization
 
-There are currently no per-user permissions within the service. Any caller presenting a valid token with an allowed audience can read, create, edit and delete any profile. Access to the service should therefore be limited to trusted DataGEMS clients and services.
+There are currently no per-user permissions within the service. Any caller presenting a valid token with an allowed audience can read, create, edit and delete any profile through the `/user/{user_id}` endpoints. Access to the service should therefore be limited to trusted DataGEMS clients and services.
+
+The `/user/me` endpoints only ever act on the user the token belongs to: the user id is taken from the token's subject (*sub* claim), not from the request. Likewise, a query notification only creates a missing user when the user id is the token's own subject.
 
 ## Personal data
 
 Full profiles (`GET /user/{user_id}`) include personal data, such as email and date of birth, and the user's query log. Services that only need to personalise their behaviour should use the portable profile (`GET /user/{user_id}/profile`), which leaves these out.
 
+Users created automatically get their name, surname and email from the claims of their token (`given_name` or `preferred_username`, `family_name`, `email`). Users can see and change these data, or delete their profile, through the `/user/me` endpoints.
+
 ## Calls to other services
 
-To extract keywords, the service reads the user's queries from the DMM on behalf of the caller, by forwarding the caller's access token as is. There is no token exchange: the token must also be accepted by the DMM, so its audience must include the DMM as well. If the DMM rejects the token, keyword generation answers 502 with the DMM status code.
+To extract keywords, the service reads the user's queries from the DMM on behalf of the caller, by forwarding the caller's access token as is. There is no token exchange: the token must also be accepted by the DMM, so its audience must include the DMM as well. If the DMM rejects the token, keyword generation answers 502 with the DMM status code, and the automatic refresh logs the error. For query notifications, the token is the user's own, forwarded by the Query Recommender, and is kept in memory only for the duration of the background refresh.
 
 The caller's token is never sent to the LLM endpoint, which is called with a dedicated service token, nor to ORCID, whose public Api needs no authentication.
 

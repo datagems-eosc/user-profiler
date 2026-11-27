@@ -2,7 +2,7 @@
 
 This is the documentation site for the DataGEMS User Profiler Api. The service is part of the wider [DataGEMS](https://datagems.eu/) platform. This is part of the overall [platform documentation](https://datagems-eosc.github.io/).
 
-The User Profiler Api keeps a profile for each DataGEMS user: who they are, where they work, their ORCID research output and, most importantly, a set of **interest keywords**. The keywords come from two sources: the user's ORCID record, and the natural language queries they ran on the platform, from which an LLM extracts the topics they care about. Session keywords age over time, so recent interests weigh more than old ones.
+The User Profiler Api keeps a profile for each DataGEMS user: who they are, where they work, their ORCID research output and, most importantly, a set of **interest keywords**. The keywords come from two sources: the user's ORCID record, and the natural language queries they ran on the platform, from which an LLM extracts the topics they care about. Session keywords are updated automatically every time the user runs a query, and age over time, so recent interests weigh more than old ones. Users can see and edit their own profile and keywords through the DataGEMS user interface.
 
 Other DataGEMS services read a trimmed, portable version of the profile to personalise what they offer. For example, the [Query Recommender](https://datagems-eosc.github.io/query-recommender/) uses it to suggest the next queries:
 
