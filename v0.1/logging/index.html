@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -763,6 +763,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#keyword-refresh-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyword refresh logs
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1047,6 +1058,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#keyword-refresh-logs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyword refresh logs
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1157,7 +1179,63 @@
 </tr>
 </tbody>
 </table>
-<p>DMM errors are not logged separately, as their details are returned to the caller in the 502 response, see <a href="../error-codes/">Status &amp; Error Codes</a>.</p>
+<p>For <code>generate-keywords</code> and <code>queries_test</code>, DMM errors are not logged separately, as their details are returned to the caller in the 502 response, see <a href="../error-codes/">Status &amp; Error Codes</a>.</p>
+<h2 id="keyword-refresh-logs">Keyword refresh logs<a class="headerlink" href="#keyword-refresh-logs" title="Permanent link">&para;</a></h2>
+<p>The keyword refresh runs in the background after a query notification, so its outcome is only visible in the logs. These lines are written by the <code>up_api.routers.keywords</code> and <code>up_api.routers.user</code> loggers, in the format <code>&lt;time&gt; &lt;level&gt; &lt;logger&gt;: &lt;message&gt;</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Level</th>
+<th>Message</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>INFO</td>
+<td><code>Query notified for &lt;user_id&gt;: '&lt;query&gt;'</code></td>
+<td>A query notification was received and a refresh started</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td><code>User &lt;user_id&gt; not in the graph: created from the token</code></td>
+<td>The user was unknown and was created from the token's claims</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td><code>Refresh of &lt;user_id&gt;: dmm=... llm=... added=[...] refreshed=[...] detail=...</code></td>
+<td>Outcome of a refresh: <code>dmm</code> is <code>ok</code> or <code>error</code>, <code>llm</code> is <code>ok</code>, <code>error</code> or <code>skipped</code> (no new queries), followed by the new and refreshed keywords</td>
+</tr>
+<tr>
+<td>INFO</td>
+<td><code>Refresh of &lt;user_id&gt;: notified query already processed: '&lt;query&gt;'</code></td>
+<td>The notified query had already been processed by an earlier refresh, e.g. when the same query is notified twice</td>
+</tr>
+<tr>
+<td>WARNING</td>
+<td><code>Refresh of &lt;user_id&gt;: notified query not found in the DMM after &lt;n&gt; attempts: '&lt;query&gt;'</code></td>
+<td>The DMM did not have the notified query yet after all the attempts. Any other new queries are still processed, and the missing one is picked up by a later refresh</td>
+</tr>
+<tr>
+<td>WARNING</td>
+<td><code>Keyword refresh of &lt;user_id&gt;: &lt;detail&gt;</code></td>
+<td>The DMM or the LLM failed. Nothing was saved</td>
+</tr>
+<tr>
+<td>ERROR</td>
+<td><code>Keyword refresh of &lt;user_id&gt;: unexpected LLM error</code></td>
+<td>The LLM call raised an unexpected error. The stack trace follows</td>
+</tr>
+<tr>
+<td>ERROR</td>
+<td><code>Refresh of &lt;user_id&gt; failed</code></td>
+<td>The refresh failed for an unexpected reason. The stack trace follows</td>
+</tr>
+</tbody>
+</table>
+<p>To follow the refreshes of one user in the DataGEMS cluster:</p>
+<div class="highlight"><pre><span></span><code>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>univr<span class="w"> </span>deployment/user-profiler<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>&lt;user_id&gt;
+</code></pre></div>
 <p>The service does not currently produce structured (JSON) logs, propagate a correlation identifier, or emit accounting entries.</p>
 
 
@@ -1248,7 +1326,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

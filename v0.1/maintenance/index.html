@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1190,6 +1190,8 @@
 <li><strong>Keyword generation answers 502 with <code>The DMM returned 401</code> or <code>403</code></strong>: the token is not accepted by the DMM. It needs the DMM audience as well</li>
 <li><strong>Keyword generation answers 502 with the LLM message</strong>: the LLM endpoint is unreachable, <code>LLM_TOKEN</code> is wrong, or TLS verification is failing (look for <code>CERTIFICATE_VERIFY_FAILED</code> in the logs)</li>
 <li><strong>Keyword generation always returns an empty list</strong>: the DMM has no queries for that user id. Check that the profile was created with the same id the DMM logs the user under</li>
+<li><strong>Keywords do not update after the user's queries</strong>: look for the user's id in the logs. No <code>Query notified</code> line means the Query Recommender is not sending notifications. A <code>Refresh of ...</code> line with <code>dmm=error</code> or <code>llm=error</code> gives the cause, as for keyword generation above. Repeated <code>notified query not found in the DMM</code> warnings mean the DMM is slow to record queries, or <code>DMM_URL</code> points to another DMM instance than the one the platform writes to</li>
+<li><strong><code>notified query already processed</code> in the logs</strong>: the same query was notified more than once, e.g. by a client that sends each query twice. The later notifications find no new queries and change nothing, so this is harmless</li>
 </ul>
 
 
@@ -1280,7 +1282,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

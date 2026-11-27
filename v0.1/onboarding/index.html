@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1222,7 +1222,7 @@
 uv<span class="w"> </span>sync
 uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </span>up_api.main:app<span class="w"> </span>--reload
 </code></pre></div>
-<p>The Api is then available at <code>http://localhost:8000</code>, with the Swagger UI at <code>http://localhost:8000/api/v1/swagger</code>. The database is created in <code>./grafeo_data</code>. To use keyword generation, set the LLM and DMM variables described in <a href="../configuration/">Configuration</a>.</p>
+<p>The Api is then available at <code>http://localhost:8000</code>, with the Swagger UI at <code>http://localhost:8000/api/v1/swagger</code>. The database is created in <code>./grafeo_data</code>. To extract keywords, set the LLM and DMM variables described in <a href="../configuration/">Configuration</a>.</p>
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <p>Ready-to-run scripts that exercise the endpoints end to end are in the <a href="https://github.com/datagems-eosc/user-profiler/tree/main/examples">examples</a> folder of the code repository, for bash (<code>api_examples.sh</code>) and PowerShell (<code>api_examples.ps1</code>). They start from an empty database, create two users, run through the operations, and delete both users so the database is clean at the end.</p>
 <div class="highlight"><pre><span></span><code>bash<span class="w"> </span>examples/api_examples.sh
@@ -1233,17 +1233,19 @@ uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </s
 <div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-H<span class="w"> </span><span class="s2">"Authorization: Bearer </span><span class="nv">$TOKEN</span><span class="s2">"</span><span class="w"> </span>http://localhost:8000/users
 </code></pre></div>
 <h2 id="user-interface">User interface<a class="headerlink" href="#user-interface" title="Permanent link">&para;</a></h2>
-<p>The code repository includes a <a href="https://streamlit.io/">Streamlit</a> interface, <code>app.py</code>, for interactive use:</p>
+<p>The code repository includes a <a href="https://streamlit.io/">Streamlit</a> interface for testing, <code>app.py</code>, with one module per tab in <code>ui_local/tabs/</code>:</p>
 <div class="highlight"><pre><span></span><code>uv<span class="w"> </span>sync<span class="w">                      </span><span class="c1"># Streamlit is a development dependency</span>
 uv<span class="w"> </span>run<span class="w"> </span>streamlit<span class="w"> </span>run<span class="w"> </span>app.py
 </code></pre></div>
 <p>In the sidebar you choose the Api to use (local, the DataGEMS development instance, or local with DMM mode) and paste the Keycloak access token, which can also be provided through the <code>DATAGEMS_TOKEN</code> environment variable. The interface warns when the token is missing or expired.</p>
-<p>It has three tabs:</p>
+<p>It has four tabs. Only the selected one runs, so the hidden tabs make no Api calls:</p>
 <ul>
 <li><strong>Users</strong>: list, create, edit and delete users. When creating or editing a user, ORCID data can be fetched from ORCID by iD. A user's page shows their location, keywords, ORCID data and sessions, and lets you generate keywords and <strong>Accept &amp; save</strong> the new ones</li>
 <li><strong>Chat</strong>: pick a user and type queries as they would. Queries are recorded in a session, which is closed after 5 minutes of inactivity</li>
 <li><strong>DMM queries</strong>: look up the queries the DMM has logged for a user id, or the most recent queries by any user. Useful to find which user id a query was logged under</li>
+<li><strong>UI demo</strong>: a mock of the profile settings page of the DataGEMS user interface, for its developers. It only calls the <code>/user/me</code> endpoints, as the user of the token in the sidebar: it shows the profile, edits it, shows the keywords with their status, and offers to create the profile if it does not exist yet</li>
 </ul>
+<p>With <strong>Local + DMM</strong> selected, the <strong>Users</strong> tab also lets you add a DMM user to the local database and run a keyword refresh from the DMM.</p>
 <h2 id="tutorials">Tutorials<a class="headerlink" href="#tutorials" title="Permanent link">&para;</a></h2>
 <p>You can find useful material and onboarding guidelines in our social channels below, as well as our <a href="https://datagems-eosc.github.io/">platform documentation</a>.</p>
 <h2 id="keep-in-touch">Keep in touch<a class="headerlink" href="#keep-in-touch" title="Permanent link">&para;</a></h2>
@@ -1345,7 +1347,7 @@ uv<span class="w"> </span>run<span class="w"> </span>streamlit<span class="w"> <
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

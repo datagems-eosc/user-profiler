@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1361,7 +1361,7 @@
 </tr>
 </tbody>
 </table>
-<p>The LLM is only needed by <code>GET /user/{user_id}/generate-keywords</code>. If these variables are not set, every other endpoint still works.</p>
+<p>The LLM is needed by the keyword refresh triggered by query notifications, and by <code>GET /user/{user_id}/generate-keywords</code>. If these variables are not set, every endpoint still answers, but no keywords are extracted: refreshes fail (and are logged), and <code>generate-keywords</code> answers 502.</p>
 <p>The preferred model is <code>kimi-k2.6</code>. The service checks it against the model list and falls back to the first available model if it is not offered. The preferred model is currently set in code, not through configuration.</p>
 <h3 id="dmm">DMM<a class="headerlink" href="#dmm" title="Permanent link">&para;</a></h3>
 <table>
@@ -1376,7 +1376,22 @@
 <tr>
 <td><code>DMM_URL</code></td>
 <td><code>https://datagems-dev.scayle.es/dmm</code></td>
-<td>Base URL of the Data Model Management service, where the users' queries are read from. In the DataGEMS cluster this is <code>http://data-model-management-service:5000</code></td>
+<td>Base URL of the Data Model Management service, where the users' queries are read from. In the DataGEMS cluster this is <code>http://data-model-management-service:5000</code>. The default is the public development instance, so always set it explicitly in a deployment</td>
+</tr>
+<tr>
+<td><code>DMM_QUERY_ATTEMPTS</code></td>
+<td><code>3</code></td>
+<td>How many times a keyword refresh reads the DMM while the notified query is not there yet</td>
+</tr>
+<tr>
+<td><code>DMM_QUERY_RETRY_SECONDS</code></td>
+<td><code>2</code></td>
+<td>Seconds between those attempts</td>
+</tr>
+<tr>
+<td><code>MAX_STORED_QUERIES</code></td>
+<td><code>50</code></td>
+<td>How many queries are read from the DMM at a time, and kept in the user's <code>dmm-history</code> session</td>
 </tr>
 <tr>
 <td><code>MOCK_DMM</code></td>
@@ -1385,6 +1400,7 @@
 </tr>
 </tbody>
 </table>
+<p>See <a href="../architecture/#keyword-refresh">Keyword refresh</a>.</p>
 <h3 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1398,7 +1414,7 @@
 <tr>
 <td><code>OIDC_ISSUER_URL</code></td>
 <td><code>https://datagems-dev.scayle.es/oauth/realms/dev</code></td>
-<td>The expected token issuer (<em>iss</em> claim), i.e. the DataGEMS AAI realm</td>
+<td>The expected token issuer (<em>iss</em> claim), i.e. the DataGEMS AAI realm. The default is the development realm: in production it must be set to the production realm, otherwise production tokens are rejected</td>
 </tr>
 <tr>
 <td><code>OIDC_JWKS_URL</code></td>
@@ -1547,7 +1563,7 @@ uvicorn<span class="w"> </span>up_api.main:app<span class="w"> </span>--reload
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

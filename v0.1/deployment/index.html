@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1173,12 +1173,12 @@
 <span class="w">  </span>ghcr.io/datagems-eosc/datagems-eosc/user-profiler:&lt;version&gt;
 </code></pre></div>
 <h2 id="kubernetes">Kubernetes<a class="headerlink" href="#kubernetes" title="Permanent link">&para;</a></h2>
-<p>In the DataGEMS development cluster the service runs in the <code>univr</code> namespace, as:</p>
+<p>In the DataGEMS clusters the service runs in the <code>univr</code> namespace, as:</p>
 <ul>
 <li>a <strong>Deployment</strong> <code>user-profiler</code> with a <strong>single replica</strong> and the <strong><code>Recreate</code></strong> strategy, as the embedded database can only be used by one process at a time (see <a href="../datastore/">Data Stores</a>). It has a readiness probe on TCP port 5000 and resource limits of 500m CPU and 2Gi memory</li>
 <li>a <strong>PersistentVolumeClaim</strong> <code>user-profiler-pvc</code>, mounted on <code>/data</code>, holding the database (<code>GRAFEO_DB_PATH=/data/grafeo_data</code>)</li>
 <li>a <strong>ClusterIP Service</strong> <code>user-profiler-service</code> on port 5000, which is how other services in the cluster, such as the Query Recommender, reach it</li>
-<li>an <strong>Ingress</strong> and an <strong>HTTPRoute</strong> exposing <code>https://datagems-dev.scayle.es/up/...</code>, stripping the <code>/up</code> prefix (<code>ROOT_PATH</code> is set to <code>/up</code> accordingly), with request timeouts raised to 300 seconds to leave room for keyword generation</li>
+<li>in development only, an <strong>HTTPRoute</strong> on the DataGEMS gateway exposing <code>https://datagems-dev.scayle.es/up/...</code>, stripping the <code>/up</code> prefix (<code>ROOT_PATH</code> is set to <code>/up</code> accordingly), with request timeouts raised to 300 seconds to leave room for keyword generation. In production the service is not exposed publicly: it is only reached inside the cluster, through its Service</li>
 <li>a <strong>VaultStaticSecret</strong> that syncs the <code>LLM_TOKEN</code> from Vault into the <code>user-profiler-secrets</code> Kubernetes secret</li>
 </ul>
 <p>The manifests are maintained in the deployment repository of the service.</p>
@@ -1189,7 +1189,7 @@
 <ul>
 <li>the DataGEMS AAI, to verify tokens. Without it, authenticated calls fail with 503</li>
 <li>a persistent volume for the database. Without it, users are lost at every redeploy</li>
-<li>the DMM and the LLM endpoint, to generate keywords. Without them, keyword generation fails with 502, while every other endpoint keeps working</li>
+<li>the DMM and the LLM endpoint, to extract keywords. Without them, keyword refreshes fail (and are logged) and keyword generation fails with 502, while every other endpoint keeps working</li>
 <li>the ORCID public Api, to fetch ORCID records. Only <code>GET /orcid/{orcid_id}</code> depends on it</li>
 </ul>
 <p>The <a href="../architecture/">Architecture</a> section describes the ecosystem in which the service needs to operate.</p>
@@ -1282,7 +1282,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

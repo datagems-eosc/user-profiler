@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -930,6 +930,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-do-users-get-keywords" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How do users get keywords?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#i-ran-a-query-but-my-keywords-did-not-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        I ran a query, but my keywords did not change
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-doesnt-keyword-generation-save-anything" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -956,6 +978,17 @@
     <span class="md-ellipsis">
       
         Keyword generation fails with "The DMM returned 401"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-the-difference-between-userme-and-useruser_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is the difference between /user/me and /user/{user_id}?
       
     </span>
   </a>
@@ -1114,6 +1147,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#how-do-users-get-keywords" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How do users get keywords?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#i-ran-a-query-but-my-keywords-did-not-change" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        I ran a query, but my keywords did not change
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#why-doesnt-keyword-generation-save-anything" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1140,6 +1195,17 @@
     <span class="md-ellipsis">
       
         Keyword generation fails with "The DMM returned 401"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-the-difference-between-userme-and-useruser_id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is the difference between /user/me and /user/{user_id}?
       
     </span>
   </a>
@@ -1252,12 +1318,18 @@
 <p><code>/user/{user_id}</code> returns everything the service stores about the user, including personal data and the session log. <code>/user/{user_id}/profile</code> is the portable profile meant for other services: active keywords ranked by weight, location, affiliation and ORCID id only. Services that personalise their behaviour should use the latter.</p>
 <h2 id="why-did-a-keyword-disappear-from-the-profile">Why did a keyword disappear from the profile?<a class="headerlink" href="#why-did-a-keyword-disappear-from-the-profile" title="Permanent link">&para;</a></h2>
 <p>Its weight dropped below <code>KEYWORD_MIN_WEIGHT</code> because it was not seen for a long time (about 100 days with the default settings). It is still stored and listed by <code>/user/{user_id}/keywords</code> with <code>"expired": true</code>, and comes back if it is extracted again. See <a href="../architecture/#keyword-ageing">Keyword ageing</a>.</p>
+<h2 id="how-do-users-get-keywords">How do users get keywords?<a class="headerlink" href="#how-do-users-get-keywords" title="Permanent link">&para;</a></h2>
+<p>Automatically. Every time a user runs a query, the Query Recommender notifies this service (<code>POST /user/{user_id}/queries</code>), which reads the user's new queries from the DMM, extracts their keywords with the LLM and saves them. Users do not need to create their profile first: it is created from their token at their first query. See <a href="../architecture/#keyword-refresh">Keyword refresh</a>.</p>
+<h2 id="i-ran-a-query-but-my-keywords-did-not-change">I ran a query, but my keywords did not change<a class="headerlink" href="#i-ran-a-query-but-my-keywords-did-not-change" title="Permanent link">&para;</a></h2>
+<p>The refresh runs in the background, after the notification has been answered, and takes a few seconds (longer the first time, when all the user's latest queries are processed). If the keywords still do not change, look for the user's id in the logs (see <a href="../logging/">Logging</a>): the refresh logs its outcome, including DMM and LLM errors. The development endpoint <code>refresh-keyword_test</code> runs a refresh and returns its outcome directly.</p>
 <h2 id="why-doesnt-keyword-generation-save-anything">Why doesn't keyword generation save anything?<a class="headerlink" href="#why-doesnt-keyword-generation-save-anything" title="Permanent link">&para;</a></h2>
-<p>On purpose: <code>generate-keywords</code> only proposes keywords, so they can be reviewed first. Save the ones you want with <code>POST /user/{user_id}/keywords</code>.</p>
+<p>On purpose: <code>generate-keywords</code> only proposes keywords, so they can be reviewed first. Save the ones you want with <code>POST /user/{user_id}/keywords</code>. The automatic refresh, instead, saves the keywords it extracts.</p>
 <h2 id="keyword-generation-always-returns-an-empty-list">Keyword generation always returns an empty list<a class="headerlink" href="#keyword-generation-always-returns-an-empty-list" title="Permanent link">&para;</a></h2>
-<p>The DMM has no queries logged under that user id. Profiles must be created with the same id the DMM uses for the user (<code>POST /user/{user_id}</code>). The <code>queries_test</code> endpoint, or the <strong>DMM queries</strong> tab of the Streamlit interface, shows what the DMM has for a given id.</p>
+<p>The DMM has no queries logged under that user id. Profiles must have the same id the DMM uses for the user, i.e. the subject of the user's token. Profiles created automatically always do. The <code>queries_test</code> endpoint, or the <strong>DMM queries</strong> tab of the Streamlit interface, shows what the DMM has for a given id.</p>
 <h2 id="keyword-generation-fails-with-the-dmm-returned-401">Keyword generation fails with "The DMM returned 401"<a class="headerlink" href="#keyword-generation-fails-with-the-dmm-returned-401" title="Permanent link">&para;</a></h2>
-<p>Your token is not accepted by the DMM. As the service forwards your token to the DMM, it needs the DMM audience as well as this service's.</p>
+<p>Your token is not accepted by the DMM. As the service forwards your token to the DMM, it needs the DMM audience as well as this service's. The same applies to the automatic refresh, which logs the error instead.</p>
+<h2 id="what-is-the-difference-between-userme-and-useruser_id">What is the difference between <code>/user/me</code> and <code>/user/{user_id}</code>?<a class="headerlink" href="#what-is-the-difference-between-userme-and-useruser_id" title="Permanent link">&para;</a></h2>
+<p><code>/user/me</code> works on the user the token belongs to, and is meant for the DataGEMS user interface: users see and edit their own profile without knowing their id. <code>GET /user/me</code> leaves out keywords and sessions, which <code>GET /user/me/keywords</code> and the interface itself show, and <code>PATCH /user/me</code> cannot change them. <code>/user/{user_id}</code> works on any user and returns everything.</p>
 <h2 id="should-i-use-patch-to-add-keywords">Should I use <code>PATCH</code> to add keywords?<a class="headerlink" href="#should-i-use-patch-to-add-keywords" title="Permanent link">&para;</a></h2>
 <p>No. <code>PATCH /user/{user_id}</code> replaces the whole keyword list. Use <code>POST /user/{user_id}/keywords</code>, which appends new keywords and refreshes the existing ones.</p>
 <h2 id="can-i-run-more-than-one-replica">Can I run more than one replica?<a class="headerlink" href="#can-i-run-more-than-one-replica" title="Permanent link">&para;</a></h2>
@@ -1265,7 +1337,7 @@
 <h2 id="known-issues">Known Issues<a class="headerlink" href="#known-issues" title="Permanent link">&para;</a></h2>
 <ul>
 <li>There are no per-user permissions: any accepted token can read and change any profile. See <a href="../security/">Security</a>.</li>
-<li>Writes rewrite the whole user subgraph, so concurrent writes to the same user can overwrite each other.</li>
+<li>Writes rewrite the whole user subgraph, so concurrent writes to the same user can overwrite each other. Keyword refreshes of the same user run one at a time, but an edit made while a refresh is waiting for the LLM can still be overwritten by it.</li>
 <li><code>query-recommender</code> is accepted as an audience as a temporary workaround, until the DataGEMS Keycloak configuration adds <code>user-profiler</code> to the tokens the Query Recommender forwards.</li>
 <li>The user endpoints are served at the root of the service rather than under <code>/api/v1</code>, unlike the Api root and the auth test endpoint.</li>
 <li><code>GET /</code> redirects to <code>/api/v1</code> without taking the proxy prefix into account. Behind the DataGEMS ingress, use <code>/up/api/v1</code> directly.</li>
@@ -1359,7 +1431,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

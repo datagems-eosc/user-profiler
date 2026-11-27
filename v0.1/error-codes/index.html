@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1167,6 +1167,7 @@
 <ul>
 <li>200 OK - the request has succeeded</li>
 <li>201 Created - the user was created</li>
+<li>202 Accepted - a query notification was received; the keyword refresh continues in the background</li>
 <li>401 Unauthorized - the request lacks valid authentication credentials: the token is missing, malformed, expired, has an invalid signature or was issued by another issuer</li>
 <li>403 Forbidden - the token is valid, but none of its audiences is allowed for this service</li>
 <li>404 Not Found - the user, or the ORCID record, does not exist</li>
@@ -1207,7 +1208,7 @@
 <tr>
 <td>404</td>
 <td><code>No such user: '&lt;user_id&gt;'</code></td>
-<td>Unknown user</td>
+<td>Unknown user. For the <code>/user/me</code> endpoints, the token's subject has no profile yet. For <code>POST /user/{user_id}/queries</code>, the user is unknown and is not the token's subject, so it cannot be created from the token</td>
 </tr>
 <tr>
 <td>404</td>
@@ -1271,7 +1272,8 @@
 <span class="p">}</span>
 </code></pre></div>
 <h2 id="bad-gateway">Bad Gateway<a class="headerlink" href="#bad-gateway" title="Permanent link">&para;</a></h2>
-<p>A 502 means the request was valid and authenticated, but an underpinning service needed to serve it did not work as expected. It only concerns <code>generate-keywords</code> and <code>queries_test</code>, which depend on the DMM and, for the former, the LLM. For the DMM, the <code>detail</code> includes the status code it returned, which helps telling a rejected token (401/403) from an outage. For the LLM, the exact cause is logged by the service (see <a href="../logging/">Logging</a>) but not returned to the caller. As LLM replies vary between calls, retrying may succeed.</p>
+<p>A 502 means the request was valid and authenticated, but an underpinning service needed to serve it did not work as expected. It only concerns <code>generate-keywords</code> and <code>queries_test</code>, which depend on the DMM and, for the former, the LLM.</p>
+<p>The keyword refresh never answers 502: query notifications are answered with 202 before the DMM and the LLM are called, and their failures are only logged. The development endpoint <code>refresh-keyword_test</code> reports them in its body (<code>"dmm": "error"</code> or <code>"llm": "error"</code>, with a <code>detail</code>) with status 200. For the DMM, the <code>detail</code> includes the status code it returned, which helps telling a rejected token (401/403) from an outage. For the LLM, the exact cause is logged by the service (see <a href="../logging/">Logging</a>) but not returned to the caller. As LLM replies vary between calls, retrying may succeed.</p>
 
 
 
@@ -1361,7 +1363,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

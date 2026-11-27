@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -984,7 +984,7 @@
 
 <h1 id="datagems-user-profiler-api">DataGEMS User Profiler Api<a class="headerlink" href="#datagems-user-profiler-api" title="Permanent link">&para;</a></h1>
 <p>This is the documentation site for the DataGEMS User Profiler Api. The service is part of the wider <a href="https://datagems.eu/">DataGEMS</a> platform. This is part of the overall <a href="https://datagems-eosc.github.io/">platform documentation</a>.</p>
-<p>The User Profiler Api keeps a profile for each DataGEMS user: who they are, where they work, their ORCID research output and, most importantly, a set of <strong>interest keywords</strong>. The keywords come from two sources: the user's ORCID record, and the natural language queries they ran on the platform, from which an LLM extracts the topics they care about. Session keywords age over time, so recent interests weigh more than old ones.</p>
+<p>The User Profiler Api keeps a profile for each DataGEMS user: who they are, where they work, their ORCID research output and, most importantly, a set of <strong>interest keywords</strong>. The keywords come from two sources: the user's ORCID record, and the natural language queries they ran on the platform, from which an LLM extracts the topics they care about. Session keywords are updated automatically every time the user runs a query, and age over time, so recent interests weigh more than old ones. Users can see and edit their own profile and keywords through the DataGEMS user interface.</p>
 <p>Other DataGEMS services read a trimmed, portable version of the profile to personalise what they offer. For example, the <a href="https://datagems-eosc.github.io/query-recommender/">Query Recommender</a> uses it to suggest the next queries:</p>
 <div class="highlight"><pre><span></span><code><span class="err">GET /user/3f2e1d4c-.../profile</span>
 <span class="err">Authorization: Bearer &lt;token&gt;</span>
@@ -1092,7 +1092,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": ["navigation.path", "navigation.top"], "search": "assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>

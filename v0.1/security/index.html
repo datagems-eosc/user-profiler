@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../images/favicon.jpg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
     
     
       
@@ -1222,11 +1222,13 @@
 <p>You can check that a token is accepted by calling the <code>POST /api/v1/authtest</code> endpoint, described in the <a href="../api-overview/">Api Overview</a>.</p>
 <p>The location of the configuration governing this behaviour is described in the relevant <a href="../configuration/">Configuration</a> section.</p>
 <h2 id="authorization">Authorization<a class="headerlink" href="#authorization" title="Permanent link">&para;</a></h2>
-<p>There are currently no per-user permissions within the service. Any caller presenting a valid token with an allowed audience can read, create, edit and delete any profile. Access to the service should therefore be limited to trusted DataGEMS clients and services.</p>
+<p>There are currently no per-user permissions within the service. Any caller presenting a valid token with an allowed audience can read, create, edit and delete any profile through the <code>/user/{user_id}</code> endpoints. Access to the service should therefore be limited to trusted DataGEMS clients and services.</p>
+<p>The <code>/user/me</code> endpoints only ever act on the user the token belongs to: the user id is taken from the token's subject (<em>sub</em> claim), not from the request. Likewise, a query notification only creates a missing user when the user id is the token's own subject.</p>
 <h2 id="personal-data">Personal data<a class="headerlink" href="#personal-data" title="Permanent link">&para;</a></h2>
 <p>Full profiles (<code>GET /user/{user_id}</code>) include personal data, such as email and date of birth, and the user's query log. Services that only need to personalise their behaviour should use the portable profile (<code>GET /user/{user_id}/profile</code>), which leaves these out.</p>
+<p>Users created automatically get their name, surname and email from the claims of their token (<code>given_name</code> or <code>preferred_username</code>, <code>family_name</code>, <code>email</code>). Users can see and change these data, or delete their profile, through the <code>/user/me</code> endpoints.</p>
 <h2 id="calls-to-other-services">Calls to other services<a class="headerlink" href="#calls-to-other-services" title="Permanent link">&para;</a></h2>
-<p>To extract keywords, the service reads the user's queries from the DMM on behalf of the caller, by forwarding the caller's access token as is. There is no token exchange: the token must also be accepted by the DMM, so its audience must include the DMM as well. If the DMM rejects the token, keyword generation answers 502 with the DMM status code.</p>
+<p>To extract keywords, the service reads the user's queries from the DMM on behalf of the caller, by forwarding the caller's access token as is. There is no token exchange: the token must also be accepted by the DMM, so its audience must include the DMM as well. If the DMM rejects the token, keyword generation answers 502 with the DMM status code, and the automatic refresh logs the error. For query notifications, the token is the user's own, forwarded by the Query Recommender, and is kept in memory only for the duration of the background refresh.</p>
 <p>The caller's token is never sent to the LLM endpoint, which is called with a dedicated service token, nor to ORCID, whose public Api needs no authentication.</p>
 <h2 id="tls-towards-the-llm-endpoint">TLS towards the LLM endpoint<a class="headerlink" href="#tls-towards-the-llm-endpoint" title="Permanent link">&para;</a></h2>
 <p>The service verifies the TLS certificate of the LLM endpoint against the system certificate authorities by default. This can be pointed to a specific CA bundle or certificate, or, for development against an endpoint with a self-signed certificate, disabled. Disabling verification prints a warning at startup. See <a href="../configuration/">Configuration</a>.</p>
@@ -1321,7 +1323,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.path", "navigation.top"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
